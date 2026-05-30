@@ -25,6 +25,10 @@ let cursors;
 let enemies;
 let bullets;
 let lastShot = 0;
+let expOrbs;
+let exp = 0;
+let level = 1;
+let expToNextLevel = 5;
 
 const playerVelocity = {
   x: 0,
@@ -64,6 +68,9 @@ function create() {
   // 총알
   bullets = this.physics.add.group();
 
+  // 경험치 구슬
+expOrbs = this.physics.add.group();
+
   // 충돌
   this.physics.add.overlap(
     bullets,
@@ -74,8 +81,19 @@ function create() {
       enemy.hp--;
 
       if (enemy.hp <= 0) {
-        enemy.destroy();
-      }
+
+  const orb = this.add.circle(
+    enemy.x,
+    enemy.y,
+    8,
+    0x00aaff
+  );
+
+  this.physics.add.existing(orb);
+  expOrbs.add(orb);
+
+  enemy.destroy();
+}
     }
   );
 
@@ -90,6 +108,31 @@ function create() {
     left: "A",
     right: "D",
   });
+
+  // 경험치 흡수
+this.physics.add.overlap(
+  player,
+  expOrbs,
+  (player, orb) => {
+    orb.destroy();
+
+    exp++;
+
+    console.log(
+      `EXP: ${exp}/${expToNextLevel}`
+    );
+
+    if (exp >= expToNextLevel) {
+      level++;
+      exp = 0;
+      expToNextLevel += 3;
+
+      console.log(
+        `LEVEL UP! Lv.${level}`
+      );
+    }
+  }
+);
 }
 
 function update(time) {
@@ -145,6 +188,26 @@ function update(time) {
     shootBullet.call(this);
     lastShot = time;
   }
+
+  // 경험치 구슬 끌어당김
+expOrbs.getChildren().forEach((orb) => {
+  const distance =
+    Phaser.Math.Distance.Between(
+      player.x,
+      player.y,
+      orb.x,
+      orb.y
+    );
+
+  if (distance < 150) {
+    this.physics.moveToObject(
+      orb,
+      player,
+      250
+    );
+  }
+});
+
 }
 
 function spawnEnemy() {
