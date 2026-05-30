@@ -123,14 +123,17 @@ this.physics.add.overlap(
     );
 
     if (exp >= expToNextLevel) {
-      level++;
-      exp = 0;
-      expToNextLevel += 3;
+  level++;
 
-      console.log(
-        `LEVEL UP! Lv.${level}`
-      );
-    }
+  console.log(
+    `LEVEL UP! Lv.${level}`
+  );
+
+  alert(`레벨업! Lv.${level}`);
+
+  exp = 0;
+  expToNextLevel += 3;
+}
   }
 );
 }
