@@ -29,6 +29,8 @@ let expOrbs;
 let exp = 0;
 let level = 1;
 let expToNextLevel = 5;
+let levelText;
+let levelUpText = null;
 
 const playerVelocity = {
   x: 0,
@@ -100,6 +102,10 @@ expOrbs = this.physics.add.group();
   // 카메라
   this.cameras.main.startFollow(player, true, 0.08, 0.08);
   this.cameras.main.setZoom(0.8);
+levelText = this.add.text(20, 20, `Lv. ${level}`, {
+  fontSize: "24px",
+  color: "#ffffff",
+}).setScrollFactor(0);
 
   // 키
   cursors = this.input.keyboard.addKeys({
@@ -129,7 +135,14 @@ this.physics.add.overlap(
     `LEVEL UP! Lv.${level}`
   );
 
-  alert(`레벨업! Lv.${level}`);
+  levelUpText = this.add.text(player.x, player.y - 50, `LEVEL UP! Lv.${level}`, {
+  fontSize: "20px",
+  color: "#00ff00",
+}).setDepth(100);
+
+this.time.delayedCall(1000, () => {
+  levelUpText.destroy();
+});
 
   exp = 0;
   expToNextLevel += 3;
@@ -200,7 +213,8 @@ expOrbs.getChildren().forEach((orb) => {
       player.y,
       orb.x,
       orb.y
-    );
+    )
+    levelText.setText(`Lv. ${level}`);
 
   if (distance < 150) {
     this.physics.moveToObject(
