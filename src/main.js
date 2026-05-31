@@ -463,13 +463,10 @@ function showWeaponSelection() {
     weaponManager.addOrUpgrade(weaponType.id);
     updateWeaponHud();
     overlay.destroy(true);
-    this.input.keyboard.off("keydown-ONE", keyHandlers[0]);
-    this.input.keyboard.off("keydown-TWO", keyHandlers[1]);
-    this.input.keyboard.off("keydown-THREE", keyHandlers[2]);
+   
     resumeGameplay.call(this);
   };
 
-  const keyHandlers = options.map((weaponType) => () => selectOption(weaponType));
 
   options.forEach((weaponType, index) => {
     const x = isCompact
@@ -495,10 +492,6 @@ function showWeaponSelection() {
     hitZone.on("pointerout", () => card.getByName("bg").setStrokeStyle(2, weaponType.color));
     overlay.add([card, hitZone]);
   });
-
-  this.input.keyboard.on("keydown-ONE", keyHandlers[0]);
-  this.input.keyboard.on("keydown-TWO", keyHandlers[1]);
-  this.input.keyboard.on("keydown-THREE", keyHandlers[2]);
 }
 
 function createWeaponCard(x, y, number, weaponType, nextLevel) {
@@ -1468,31 +1461,35 @@ function killPlayer() {
     .setScrollFactor(0)
     .setDepth(5001);
 
-  this.add
-    .text(
-      this.scale.width / 2,
-      this.scale.height / 2 + 70,
-      "R 키로 재시작",
-      {
-        fontSize: "20px",
-        color: "#bbbbbb",
-      }
-    )
-    .setOrigin(0.5)
-    .setScrollFactor(0)
-    .setDepth(5001);
+const restartBtnBg = this.add
+  .rectangle(this.scale.width / 2, this.scale.height / 2 + 70, 180, 44, 0xff4444, 0.15)
+  .setStrokeStyle(1.5, 0xff4444, 0.75)
+  .setScrollFactor(0)
+  .setDepth(5001)
+  .setInteractive({ useHandCursor: true });
 
-  this.input.keyboard.once(
-    "keydown-R",
-    () => {
-      this.scene.restart();
-      isDead = false;
-    }
-  );
+const restartBtnText = this.add
+  .text(this.scale.width / 2, this.scale.height / 2 + 70, "RESTART", {
+    fontSize: "18px",
+    color: "#ff4444",
+    fontStyle: "bold",
+    letterSpacing: 4,
+  })
+  .setOrigin(0.5)
+  .setScrollFactor(0)
+  .setDepth(5002)
+  .setInteractive({ useHandCursor: true });
+
+const doRestart = () => {
+  isDead = false;
+  this.scene.restart();
+};
+
+restartBtnBg.on("pointerdown", doRestart);
+restartBtnText.on("pointerdown", doRestart);
 }
 
 function showStartScreen() {
-  // 게임플레이 일시정지
   this.physics.pause();
   spawnTimer.paused = true;
   enemyHealthTimer.paused = true;
@@ -1509,61 +1506,34 @@ function showStartScreen() {
   const H = this.scale.height;
   const cx = W / 2;
   const cy = H / 2;
-  const ui = this.add.container(0, 0).setScrollFactor(0).setDepth(9000);
 
-  // 배경 오버레이
-  const bg = this.add.rectangle(0, 0, W, H, 0x000000, 0.88).setOrigin(0);
+  const objs = [];
 
-  // 장식선 — 위
-  const lineTop = this.add.rectangle(cx, cy - 112, 260, 1, 0x00ffd5, 0.35);
-
-  // 타이틀 — ABYSS
+  const bg = this.add.rectangle(0, 0, W, H, 0x000000, 0.88).setOrigin(0).setScrollFactor(0).setDepth(9000);
+  const lineTop = this.add.rectangle(cx, cy - 112, 260, 1, 0x00ffd5, 0.35).setScrollFactor(0).setDepth(9001);
   const title1 = this.add.text(cx, cy - 88, "ABYSS", {
-    fontSize: "64px",
-    color: "#00ffd5",
-    fontStyle: "bold",
-    letterSpacing: 18,
-  }).setOrigin(0.5);
-
-  // 타이틀 — WALKER (색상 다르게)
+    fontSize: "64px", color: "#00ffd5", fontStyle: "bold", letterSpacing: 18,
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
   const title2 = this.add.text(cx, cy - 20, "WALKER", {
-    fontSize: "38px",
-    color: "#ffffff",
-    fontStyle: "bold",
-    letterSpacing: 22,
-    alpha: 0.82,
-  }).setOrigin(0.5);
-
-  // 장식선 — 아래
-  const lineBot = this.add.rectangle(cx, cy + 18, 260, 1, 0x00ffd5, 0.35);
-
-  // 부제
+    fontSize: "38px", color: "#ffffff", fontStyle: "bold", letterSpacing: 22,
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const lineBot = this.add.rectangle(cx, cy + 18, 260, 1, 0x00ffd5, 0.35).setScrollFactor(0).setDepth(9001);
   const sub = this.add.text(cx, cy + 44, "어둠 속을 걸어라", {
-    fontSize: "16px",
-    color: "#7ecfc0",
-    letterSpacing: 4,
-  }).setOrigin(0.5);
-
-  // 시작 버튼
+    fontSize: "16px", color: "#7ecfc0", letterSpacing: 4,
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
   const btnBg = this.add.rectangle(cx, cy + 108, 200, 48, 0x00ffd5, 0.12)
-    .setStrokeStyle(1.5, 0x00ffd5, 0.75);
-
+    .setStrokeStyle(1.5, 0x00ffd5, 0.75).setScrollFactor(0).setDepth(9002)
+    .setInteractive({ useHandCursor: true });
   const btnText = this.add.text(cx, cy + 108, "ENTER THE ABYSS", {
-    fontSize: "15px",
-    color: "#00ffd5",
-    fontStyle: "bold",
-    letterSpacing: 3,
-  }).setOrigin(0.5);
-
-  // 조작 안내 (작게)
+    fontSize: "15px", color: "#00ffd5", fontStyle: "bold", letterSpacing: 3,
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(9003)
+    .setInteractive({ useHandCursor: true });
   const hint = this.add.text(cx, cy + 164, "WASD / 조이스틱으로 이동", {
-    fontSize: "13px",
-    color: "#446060",
-  }).setOrigin(0.5);
+    fontSize: "13px", color: "#446060",
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
 
-  ui.add([bg, lineTop, title1, title2, lineBot, sub, btnBg, btnText, hint]);
+  objs.push(bg, lineTop, title1, title2, lineBot, sub, btnBg, btnText, hint);
 
-  // 버튼 깜빡이기 (pulse)
   this.tweens.add({
     targets: [btnBg, btnText],
     alpha: { from: 0.6, to: 1 },
@@ -1573,23 +1543,18 @@ function showStartScreen() {
     ease: "Sine.easeInOut",
   });
 
-  // 타이틀 fade-in
-  [bg, lineTop, title1, title2, lineBot, sub, btnBg, btnText, hint].forEach((obj, i) => {
+  objs.forEach((obj, i) => {
     obj.setAlpha(0);
     this.tweens.add({
       targets: obj,
-      alpha: i === 1 || i === 3 ? 0.35 : 1,
+      alpha: i === 1 || i === 4 ? 0.35 : 1,
       duration: 500,
       delay: i * 80,
     });
   });
 
-  // 클릭 / 터치로 시작
-  btnBg.setInteractive({ useHandCursor: true });
-  btnText.setInteractive({ useHandCursor: true });
-
   const startGame = () => {
-    ui.destroy(true);
+    objs.forEach((obj) => obj.destroy());
     this.physics.resume();
     spawnTimer.paused = false;
     enemyHealthTimer.paused = false;
@@ -1601,12 +1566,8 @@ function showStartScreen() {
       joystick.knob.setVisible(true);
       joystick.zone.setInteractive();
     }
-    this.input.keyboard.off("keydown-ENTER", startGame);
-    this.input.keyboard.off("keydown-SPACE", startGame);
   };
 
   btnBg.on("pointerdown", startGame);
   btnText.on("pointerdown", startGame);
-  this.input.keyboard.on("keydown-ENTER", startGame);
-  this.input.keyboard.on("keydown-SPACE", startGame);
 }
