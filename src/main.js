@@ -80,6 +80,97 @@ const WEAPON_TYPES = [
 },
 ];
 
+const FUSION_RECIPES = [
+  {
+    id: "stormNet",
+    name: "뇌전망",
+    icon: "SN",
+    color: 0x00eeff,
+    requires: ["lightning", "chain"],
+    desc: "전장 전체 전기 그물 — 모든 적 지속 감전",
+  },
+  {
+    id: "gravityScythe",
+    name: "중력낫",
+    icon: "GS",
+    color: 0xcc44ff,
+    requires: ["blackHole", "boomerang"],
+    desc: "블랙홀을 던져 경로 흡입 후 왕복 폭발",
+  },
+  {
+    id: "poisonGun",
+    name: "독탄기관총",
+    icon: "PG",
+    color: 0x88ff44,
+    requires: ["machineGun", "skull"],
+    desc: "총알마다 독 스택 — 처치 시 독 구름 생성",
+  },
+  {
+    id: "magicSword",
+    name: "마법검사",
+    icon: "MS",
+    color: 0xff88ff,
+    requires: ["magicMissile", "sword"],
+    desc: "검 궤적마다 추적 마법진 연쇄 폭발",
+  },
+  {
+    id: "plasmaCannon",
+    name: "열분해포",
+    icon: "PC",
+    color: 0xff6622,
+    requires: ["laser", "lung"],
+    desc: "레이저 경로가 연속 폭발 화염 지대로 변함",
+  },
+  {
+    id: "stormSword",
+    name: "폭풍검",
+    icon: "SS",
+    color: 0x44ffcc,
+    requires: ["sword", "boomerang"],
+    desc: "검을 던져 관통 왕복 베기 — 복귀 시 회오리",
+  },
+  {
+    id: "plagueEye",
+    name: "역병의 눈",
+    icon: "PE",
+    color: 0xaaff44,
+    requires: ["skull", "blackHole"],
+    desc: "흡입하며 독 전파 — 폭발 시 독 구름 확산",
+  },
+  {
+    id: "plasmaBeam",
+    name: "플라즈마 빔",
+    icon: "PB",
+    color: 0x66ffff,
+    requires: ["lightning", "laser"],
+    desc: "레이저 피격 적에게 즉시 낙뢰 연쇄 감전",
+  },
+  {
+    id: "explosiveBoom",
+    name: "폭발 부메랑",
+    icon: "EB",
+    color: 0xffaa33,
+    requires: ["lung", "boomerang"],
+    desc: "부메랑 경로마다 폭발 연쇄 — 왕복 카펫폭격",
+  },
+  {
+    id: "multiMissile",
+    name: "다연장 추적포",
+    icon: "MM2",
+    color: 0xff66aa,
+    requires: ["machineGun", "magicMissile"],
+    desc: "기관총 속도로 추적 미사일 난사",
+  },
+  {
+    id: "deathScythe",
+    name: "사신의 낫",
+    icon: "DS",
+    color: 0xccffaa,
+    requires: ["chain", "scythe"],
+    desc: "낫에 사슬이 걸려 적을 끌어당기며 연속 베기",
+  },
+];
+
 const config = {
   type: Phaser.AUTO,
   backgroundColor: "#111111",
@@ -507,22 +598,30 @@ function resumeGameplay() {
 }
 
 function showWeaponSelection() {
+  // 조합 가능한 것 먼저 체크
+  const availableFusions = weaponManager.getAvailableFusions();
+
+  if (availableFusions.length > 0) {
+    showFusionSelection.call(this, availableFusions);
+    return;
+  }
+
+  // 일반 무기 선택
   const options = getRandomWeaponOptions();
-  if (options.length === 0) return; 
+  if (options.length === 0) return;
   pauseGameplay.call(this);
+
   const overlay = this.add.container(0, 0).setScrollFactor(0).setDepth(2000);
-  const shade = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.65)
-    .setOrigin(0);
+  const shade = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.65).setOrigin(0);
 
   const isCompact = this.scale.width < 760;
   const compactCardScale = Phaser.Math.Clamp((this.scale.height - 92) / (260 * 3 + 24), 0.54, 0.78);
   const cardScale = isCompact ? compactCardScale : 1;
   const compactCardHeight = 260 * cardScale;
   const titleY = isCompact ? 28 : this.scale.height / 2 - 170;
-  const title = this.add.text(this.scale.width / 2, titleY, "\uBB34\uAE30 \uC120\uD0DD", {
-    fontSize: "32px",
-    color: "#ffffff",
-    fontStyle: "bold",
+
+  const title = this.add.text(this.scale.width / 2, titleY, "무기 선택", {
+    fontSize: "32px", color: "#ffffff", fontStyle: "bold",
   }).setOrigin(0.5);
 
   overlay.add([shade, title]);
@@ -534,10 +633,8 @@ function showWeaponSelection() {
     weaponManager.addOrUpgrade(weaponType.id);
     updateWeaponHud();
     overlay.destroy(true);
-   
     resumeGameplay.call(this);
   };
-
 
   options.forEach((weaponType, index) => {
     const x = isCompact
@@ -552,9 +649,7 @@ function showWeaponSelection() {
     card.setScale(cardScale);
 
     const hitZone = this.add.zone(x, y, 230 * cardScale, 286 * cardScale)
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(2001 + index)
+      .setOrigin(0.5).setScrollFactor(0).setDepth(2001 + index)
       .setInteractive({ useHandCursor: true });
 
     hitZone.on("pointerdown", () => selectOption(weaponType));
@@ -624,7 +719,12 @@ function getRandomWeaponOptions() {
 function updateWeaponHud() {
   weaponText.setText(
     weaponManager.weapons
-      .map((weapon) => `${weapon.definition.name} Lv.${weapon.level}`)
+      .map((weapon) => {
+        const isFusion = weapon.level === 99;
+        return isFusion
+          ? `✦ ${weapon.definition.name}`
+          : `${weapon.definition.name} Lv.${weapon.level}`;
+      })
       .join(" / ")
   );
   layoutHud(weaponText.scene);
@@ -1131,6 +1231,29 @@ class WeaponManager {
     if (this.weapons.length >= this.maxWeapons) return false;
     this.weapons.push(createWeapon(this.scene, type));
     return true;
+  }
+
+    // 추가 — 전설 무기 직접 삽입
+  addFusion(fusionId) {
+    if (this.weapons.length >= this.maxWeapons) return false;
+    this.weapons.push(createFusionWeapon(this.scene, fusionId));
+    return true;
+  }
+
+  // 추가 — 재료 무기 제거
+  removeWeapon(type) {
+    this.weapons = this.weapons.filter((w) => w.type !== type);
+  }
+
+  // 추가 — 현재 보유 무기로 가능한 조합 반환
+  getAvailableFusions() {
+    const ownedMaxed = this.weapons
+      .filter((w) => w.level >= 5)
+      .map((w) => w.type);
+
+    return FUSION_RECIPES.filter((recipe) =>
+      recipe.requires.every((req) => ownedMaxed.includes(req))
+    );
   }
 
   getWeapon(type) { return this.weapons.find((w) => w.type === type); }
@@ -2829,5 +2952,980 @@ updateChainLine(graphics, from, to) {
   clearChains() {
     this.activeChains.forEach((obj) => { if (obj?.active) obj.destroy(); });
     this.activeChains = [];
+  }
+}
+
+function showFusionSelection(availableFusions) {
+  pauseGameplay.call(this);
+
+  const overlay = this.add.container(0, 0).setScrollFactor(0).setDepth(2000);
+  const shade = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.75).setOrigin(0);
+
+  // 황금빛 타이틀
+  const titleGlow = this.add.text(this.scale.width / 2, this.scale.height / 2 - 200, "⚗ 진화 가능!", {
+    fontSize: "38px",
+    color: "#ffdd44",
+    fontStyle: "bold",
+    shadow: { blur: 18, color: "#ffaa00", fill: true },
+  }).setOrigin(0.5);
+
+  const subtitle = this.add.text(this.scale.width / 2, this.scale.height / 2 - 152, "두 무기가 하나로 합쳐집니다", {
+    fontSize: "16px",
+    color: "#ffeeaa",
+  }).setOrigin(0.5);
+
+  overlay.add([shade, titleGlow, subtitle]);
+
+  // 타이틀 펄스
+  this.tweens.add({
+    targets: titleGlow,
+    alpha: { from: 0.7, to: 1 },
+    scale: { from: 0.97, to: 1.03 },
+    duration: 700,
+    yoyo: true,
+    repeat: -1,
+    ease: "Sine.easeInOut",
+  });
+
+  let didSelect = false;
+
+  availableFusions.forEach((recipe, index) => {
+    const x = this.scale.width / 2 + (index - (availableFusions.length - 1) / 2) * 270;
+    const y = this.scale.height / 2 + 20;
+
+    const card = createFusionCard.call(this, x, y, recipe);
+    overlay.add(card);
+
+    const hitZone = this.add.zone(x, y, 230, 300)
+      .setOrigin(0.5).setScrollFactor(0).setDepth(2010)
+      .setInteractive({ useHandCursor: true });
+
+    hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
+    hitZone.on("pointerout", () => card.getByName("bg").setStrokeStyle(2, recipe.color));
+    hitZone.on("pointerdown", () => {
+      if (didSelect) return;
+      didSelect = true;
+
+      // 재료 제거 후 전설 무기 추가
+      recipe.requires.forEach((req) => weaponManager.removeWeapon(req));
+      weaponManager.addFusion(recipe.id);
+      updateWeaponHud();
+      overlay.destroy(true);
+
+      // 진화 연출
+      showFusionEffect.call(this, recipe);
+      resumeGameplay.call(this);
+    });
+
+    overlay.add(hitZone);
+  });
+}
+
+function createFusionCard(x, y, recipe) {
+  const card = this.add.container(x, y);
+
+  const req1 = WEAPON_TYPES.find((w) => w.id === recipe.requires[0]);
+  const req2 = WEAPON_TYPES.find((w) => w.id === recipe.requires[1]);
+
+  const bg = this.add.rectangle(0, 0, 210, 300, 0x1a1200, 0.97)
+    .setStrokeStyle(2, recipe.color)
+    .setName("bg");
+
+  // 황금 코너 장식
+  const cornerTL = this.add.rectangle(-99, -138, 18, 2, recipe.color, 0.7);
+  const cornerTL2 = this.add.rectangle(-99, -138, 2, 18, recipe.color, 0.7);
+  const cornerTR = this.add.rectangle(99, -138, 18, 2, recipe.color, 0.7);
+  const cornerTR2 = this.add.rectangle(99, -138, 2, 18, recipe.color, 0.7);
+
+  // 전설 배지
+  const badge = this.add.text(0, -118, "✦ FUSION ✦", {
+    fontSize: "11px",
+    color: `#${recipe.color.toString(16).padStart(6, "0")}`,
+    letterSpacing: 2,
+  }).setOrigin(0.5);
+
+  // 재료 무기 아이콘 (작게)
+  const mat1 = this.add.text(-32, -82, req1?.icon ?? "?", {
+    fontSize: "16px",
+    color: `#${(req1?.color ?? 0xffffff).toString(16).padStart(6, "0")}`,
+    backgroundColor: "#1e2030",
+    padding: { x: 5, y: 3 },
+  }).setOrigin(0.5);
+
+  const plus = this.add.text(0, -82, "+", {
+    fontSize: "16px", color: "#ffffff",
+  }).setOrigin(0.5);
+
+  const mat2 = this.add.text(32, -82, req2?.icon ?? "?", {
+    fontSize: "16px",
+    color: `#${(req2?.color ?? 0xffffff).toString(16).padStart(6, "0")}`,
+    backgroundColor: "#1e2030",
+    padding: { x: 5, y: 3 },
+  }).setOrigin(0.5);
+
+  const arrow = this.add.text(0, -52, "▼", {
+    fontSize: "14px",
+    color: `#${recipe.color.toString(16).padStart(6, "0")}`,
+  }).setOrigin(0.5);
+
+  // 결과 무기 아이콘
+  const icon = this.add.text(0, -14, recipe.icon, {
+    fontSize: "36px",
+    color: `#${recipe.color.toString(16).padStart(6, "0")}`,
+    fontStyle: "bold",
+  }).setOrigin(0.5);
+
+  const name = this.add.text(0, 34, recipe.name, {
+    fontSize: "22px",
+    color: "#ffffff",
+    fontStyle: "bold",
+  }).setOrigin(0.5);
+
+  const legendLabel = this.add.text(0, 66, "LEGENDARY", {
+    fontSize: "11px",
+    color: `#${recipe.color.toString(16).padStart(6, "0")}`,
+    letterSpacing: 3,
+  }).setOrigin(0.5);
+
+  const desc = this.add.text(0, 102, recipe.desc, {
+    fontSize: "13px",
+    color: "#d8deea",
+    align: "center",
+    wordWrap: { width: 170 },
+  }).setOrigin(0.5);
+
+  card.add([bg, cornerTL, cornerTL2, cornerTR, cornerTR2, badge, mat1, plus, mat2, arrow, icon, name, legendLabel, desc]);
+  return card;
+}
+
+function showFusionEffect(recipe) {
+  const cx = this.scale.width / 2;
+  const cy = this.scale.height / 2;
+
+  const flash = this.add.rectangle(0, 0, this.scale.width, this.scale.height, recipe.color, 0.35)
+    .setOrigin(0).setScrollFactor(0).setDepth(3000);
+
+  const text = this.add.text(cx, cy, `⚗ ${recipe.name}`, {
+    fontSize: "42px",
+    color: `#${recipe.color.toString(16).padStart(6, "0")}`,
+    fontStyle: "bold",
+    shadow: { blur: 22, color: "#000000", fill: true },
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(3001);
+
+  const sub = this.add.text(cx, cy + 58, "FUSION ACTIVATED", {
+    fontSize: "16px",
+    color: "#ffffff",
+    letterSpacing: 5,
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(3001);
+
+  this.tweens.add({
+    targets: flash,
+    alpha: 0,
+    duration: 600,
+    onComplete: () => flash.destroy(),
+  });
+
+  this.tweens.add({
+    targets: [text, sub],
+    alpha: { from: 1, to: 0 },
+    y: `-=30`,
+    duration: 1200,
+    delay: 400,
+    ease: "Cubic.easeIn",
+    onComplete: () => { text.destroy(); sub.destroy(); },
+  });
+}
+
+class FusionWeapon {
+  constructor(scene, fusionId) {
+    this.scene = scene;
+    this.type = fusionId;
+    this.level = 99; // 레벨업 불가
+    this.lastFire = 0;
+    this.definition = FUSION_RECIPES.find((r) => r.id === fusionId);
+  }
+
+  upgrade() {} // 업그레이드 불가
+  canFire(time, cooldown) { return time > this.lastFire + cooldown; }
+}
+
+function createFusionWeapon(scene, fusionId) {
+  switch (fusionId) {
+    case "stormNet":       return new StormNetWeapon(scene);
+    case "gravityScythe":  return new GravityScytheWeapon(scene);
+    case "poisonGun":      return new PoisonGunWeapon(scene);
+    case "magicSword":     return new MagicSwordWeapon(scene);
+    case "plasmaCannon":   return new PlasmaCannonWeapon(scene);
+    case "stormSword":     return new StormSwordWeapon(scene);
+    case "plagueEye":      return new PlagueEyeWeapon(scene);
+    case "plasmaBeam":     return new PlasmaBeamWeapon(scene);
+    case "explosiveBoom":  return new ExplosiveBoomWeapon(scene);
+    case "multiMissile":   return new MultiMissileWeapon(scene);
+    case "deathScythe":    return new DeathScytheWeapon(scene);
+    default: throw new Error(`Unknown fusion: ${fusionId}`);
+  }
+}
+
+// ⚡🔗 뇌전망
+class StormNetWeapon extends FusionWeapon {
+  constructor(scene) {
+    super(scene, "stormNet");
+    this.lastFire = 0;
+    this.netTimer = null;
+  }
+
+  tick(time) {
+    if (!this.canFire(time, 3500)) return;
+    this.lastFire = time;
+
+    const targets = findEnemiesInRange(player.x, player.y, 1000, 8);
+    if (targets.length < 2) return;
+
+    // 모든 적 쌍을 전기선으로 연결
+    for (let i = 0; i < targets.length - 1; i++) {
+      const from = targets[i];
+      const to = targets[i + 1];
+      this.drawElectricLine(from, to, time);
+      damageEnemy.call(this.scene, from, 6.0);
+      from.stunnedUntil = time + 600;
+      from.poisonUntil = Math.max(from.poisonUntil || 0, time + 2000);
+      from.poisonDamage = 0.8;
+    }
+    damageEnemy.call(this.scene, targets[targets.length - 1], 6.0);
+  }
+
+  drawElectricLine(from, to) {
+    const g = this.scene.add.graphics().setDepth(48);
+    const segments = 10;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const px = -dy / len;
+    const py = dx / len;
+    const pts = [{ x: from.x, y: from.y }];
+
+    for (let i = 1; i < segments; i++) {
+      const t = i / segments;
+      pts.push({
+        x: from.x + dx * t + px * Phaser.Math.FloatBetween(-20, 20),
+        y: from.y + dy * t + py * Phaser.Math.FloatBetween(-20, 20),
+      });
+    }
+    pts.push({ x: to.x, y: to.y });
+
+    g.lineStyle(8, 0x00eeff, 0.15);
+    g.beginPath(); g.moveTo(pts[0].x, pts[0].y);
+    pts.forEach((p) => g.lineTo(p.x, p.y)); g.strokePath();
+
+    g.lineStyle(2, 0xeeffff, 0.9);
+    g.beginPath(); g.moveTo(pts[0].x, pts[0].y);
+    pts.forEach((p) => g.lineTo(p.x, p.y)); g.strokePath();
+
+    this.scene.tweens.add({
+      targets: g, alpha: 0, duration: 400,
+      onComplete: () => g.destroy(),
+    });
+  }
+}
+
+// 🌀 중력낫
+class GravityScytheWeapon extends FusionWeapon {
+  constructor(scene) { super(scene, "gravityScythe"); }
+
+  tick(time) {
+    if (!this.canFire(time, 4000)) return;
+    this.lastFire = time;
+
+    const target = findNearestEnemy();
+    if (!target) return;
+
+    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+    this.throwGravityScythe(angle);
+  }
+
+  throwGravityScythe(angle) {
+    const speed = 480;
+    const maxDist = 600;
+    const pullRadius = 200;
+
+    const core = this.scene.add.circle(player.x, player.y, 22, 0x000000, 1)
+      .setStrokeStyle(4, 0xcc44ff, 0.9).setDepth(50);
+    const glow = this.scene.add.circle(player.x, player.y, 40, 0x6600cc, 0.25).setDepth(49);
+    this.scene.physics.add.existing(core);
+    core.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+
+    let dist = 0;
+    let returning = false;
+    let lastX = core.x;
+    let lastY = core.y;
+    const hitEnemies = new Set();
+
+    const timer = this.scene.time.addEvent({
+      delay: 16, loop: true,
+      callback: () => {
+        if (!core.active) { timer.destroy(); return; }
+
+        dist += Phaser.Math.Distance.Between(lastX, lastY, core.x, core.y);
+        lastX = core.x; lastY = core.y;
+
+        glow.setPosition(core.x, core.y);
+
+        // 흡입
+        enemies.getChildren().forEach((enemy) => {
+          if (!enemy.active) return;
+          const d = Phaser.Math.Distance.Between(core.x, core.y, enemy.x, enemy.y);
+          if (d < pullRadius) {
+            const a = Phaser.Math.Angle.Between(enemy.x, enemy.y, core.x, core.y);
+            enemy.body.setVelocity(Math.cos(a) * 160, Math.sin(a) * 160);
+            if (!hitEnemies.has(enemy)) {
+              hitEnemies.add(enemy);
+              damageEnemy.call(this.scene, enemy, 7.5);
+            }
+          }
+        });
+
+        if (!returning && dist >= maxDist) {
+          returning = true;
+          hitEnemies.clear();
+          explode.call(this.scene, core.x, core.y, 180, 9.0);
+        }
+
+        if (returning) {
+          const ra = Phaser.Math.Angle.Between(core.x, core.y, player.x, player.y);
+          core.body.setVelocity(Math.cos(ra) * speed * 1.2, Math.sin(ra) * speed * 1.2);
+
+          enemies.getChildren().forEach((enemy) => {
+            if (!enemy.active || hitEnemies.has(enemy)) return;
+            const d = Phaser.Math.Distance.Between(core.x, core.y, enemy.x, enemy.y);
+            if (d < pullRadius * 0.6) {
+              hitEnemies.add(enemy);
+              damageEnemy.call(this.scene, enemy, 7.5);
+            }
+          });
+
+          if (Phaser.Math.Distance.Between(core.x, core.y, player.x, player.y) < 35) {
+            timer.destroy();
+            core.destroy();
+            glow.destroy();
+          }
+        }
+
+        // 트레일
+        const trail = this.scene.add.circle(core.x, core.y, 10, 0xcc44ff, 0.3).setDepth(48);
+        this.scene.tweens.add({
+          targets: trail, alpha: 0, scale: 0.1, duration: 250,
+          onComplete: () => trail.destroy(),
+        });
+      },
+    });
+  }
+}
+
+// ☠️ 독탄기관총
+class PoisonGunWeapon extends FusionWeapon {
+  constructor(scene) {
+    super(scene, "poisonGun");
+    this.shotCount = 0;
+  }
+
+  tick(time) {
+    if (!this.canFire(time, 130)) return;
+    this.lastFire = time;
+
+    const count = 2;
+    for (let i = 0; i < count; i++) {
+      const target = findNearestEnemy();
+      if (!target) return;
+      const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+      const bullet = createTracerProjectile(this.scene, player.x + i * 10 - 5, player.y, angle, 0x88ff44);
+      bullet.damage = 1.8;
+      bullet.trailColor = 0x88ff44;
+
+      // 독 부여
+      this.scene.physics.moveToObject(bullet, target, 680);
+      showMuzzleFlash(this.scene, player.x, player.y, angle, 0x88ff44);
+
+      // 피격 시 독 처리 — overlap 대신 틱에서 처리
+      const origDestroy = bullet.destroy.bind(bullet);
+      let poisoned = false;
+      const checkTimer = this.scene.time.addEvent({
+        delay: 16, loop: true,
+        callback: () => {
+          if (!bullet.active) { checkTimer.destroy(); return; }
+          enemies.getChildren().forEach((enemy) => {
+            if (!enemy.active) return;
+            if (Phaser.Math.Distance.Between(bullet.x, bullet.y, enemy.x, enemy.y) < 18) {
+              enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, this.scene.time.now + 2500);
+              enemy.poisonDamage = 0.6;
+              // 처치 시 독 구름 (hp <= 0 감지)
+              const prevHp = enemy.hp;
+              damageEnemy.call(this.scene, enemy, bullet.damage);
+              if (prevHp > 0 && (!enemy.active || enemy.hp <= 0)) {
+                this.spawnPoisonCloud(enemy.x, enemy.y);
+              }
+              bullet.destroy();
+              checkTimer.destroy();
+            }
+          });
+        },
+      });
+    }
+  }
+
+  spawnPoisonCloud(x, y) {
+    const cloud = this.scene.add.circle(x, y, 70, 0x44aa22, 0.18)
+      .setStrokeStyle(2, 0x88ff44, 0.4).setDepth(36);
+
+    const duration = 3000;
+    let elapsed = 0;
+    const hitCooldown = new Map();
+
+    const timer = this.scene.time.addEvent({
+      delay: 16, loop: true,
+      callback: () => {
+        elapsed += 16;
+        cloud.setPosition(x, y);
+        enemies.getChildren().forEach((enemy) => {
+          if (!enemy.active) return;
+          if (Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y) < 70) {
+            const last = hitCooldown.get(enemy) || 0;
+            if (this.scene.time.now > last + 400) {
+              hitCooldown.set(enemy, this.scene.time.now);
+              enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, this.scene.time.now + 1500);
+              enemy.poisonDamage = 0.6;
+            }
+          }
+        });
+        if (elapsed >= duration) { timer.destroy(); }
+      },
+    });
+
+    this.scene.tweens.add({
+      targets: cloud, alpha: 0, duration,
+      onComplete: () => cloud.destroy(),
+    });
+  }
+}
+
+// 🗡️ 마법검사
+class MagicSwordWeapon extends FusionWeapon {
+  constructor(scene) {
+    super(scene, "magicSword");
+    this.rotationAngle = 0;
+  }
+
+  tick(time, delta) {
+    if (!this.canFire(time, 700)) return;
+    this.lastFire = time;
+    this.swing(time);
+  }
+
+  swing(time) {
+    const target = findNearestEnemy();
+    const angle = target
+      ? Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y)
+      : this.rotationAngle;
+
+    // 검 휘두르기
+    const arc = this.scene.add.arc(player.x, player.y, 160, -70, 70, false, 0xff88ff, 0.18)
+      .setAngle(Phaser.Math.RadToDeg(angle)).setStrokeStyle(10, 0xff88ff, 0.85).setDepth(28);
+
+    this.scene.tweens.add({
+      targets: arc, alpha: 0, scale: 1.12, duration: 220,
+      onComplete: () => arc.destroy(),
+    });
+
+    // 검 범위 피해
+    findEnemiesInRange(player.x, player.y, 160, 10).forEach((enemy) => {
+      damageEnemy.call(this.scene, enemy, 8.0);
+    });
+
+    // 마법진 연쇄 발사
+    const missileTargets = findEnemiesInRange(player.x, player.y, 700, 3);
+    missileTargets.forEach((t, i) => {
+      this.scene.time.delayedCall(i * 80, () => {
+        const bullet = createProjectile(this.scene, player.x, player.y, 0xff88ff, 9);
+        bullet.damage = 5.5;
+        bullet.homing = true;
+        bullet.target = t;
+        bullet.speed = 500;
+        bullet.explodeRadius = 65;
+        bullet.explodeDamage = 3.0;
+        bullet.trailColor = 0xff88ff;
+        bullet.trailSize = 9;
+        this.scene.physics.moveToObject(bullet, t, bullet.speed);
+
+        const aura = this.scene.add.circle(player.x, player.y, 20, 0xff88ff, 0.2).setDepth(32);
+        this.scene.tweens.add({
+          targets: aura, alpha: 0, scale: 2.2, duration: 220,
+          onComplete: () => aura.destroy(),
+        });
+      });
+    });
+  }
+}
+
+// 🔥 열분해포
+class PlasmaCannonWeapon extends FusionWeapon {
+  constructor(scene) { super(scene, "plasmaCannon"); }
+
+  tick(time, delta) {
+    if (!this.canFire(time, 1000)) return;
+    this.lastFire = time;
+
+    const targets = findEnemiesInRange(player.x, player.y, 900, 2);
+    targets.forEach((t) => {
+      const angle = Phaser.Math.Angle.Between(player.x, player.y, t.x, t.y);
+      const length = 820;
+      const endX = player.x + Math.cos(angle) * length;
+      const endY = player.y + Math.sin(angle) * length;
+      showLaserBeam(this.scene, player.x, player.y, endX, endY, true);
+
+      // 레이저 경로 위 폭발
+      const steps = 6;
+      for (let i = 1; i <= steps; i++) {
+        const t2 = i / steps;
+        const ex = player.x + (endX - player.x) * t2;
+        const ey = player.y + (endY - player.y) * t2;
+        this.scene.time.delayedCall(i * 60, () => {
+          explode.call(this.scene, ex, ey, 75, 5.5);
+          findEnemiesInRange(ex, ey, 75).forEach((enemy) => {
+            enemy.burnUntil = Math.max(enemy.burnUntil || 0, this.scene.time.now + 2000);
+          });
+        });
+      }
+    });
+  }
+}
+
+// 🌪️ 폭풍검
+class StormSwordWeapon extends FusionWeapon {
+  constructor(scene) {
+    super(scene, "stormSword");
+    this.swingAngle = 0;
+  }
+
+  tick(time) {
+    if (!this.canFire(time, 1600)) return;
+    this.lastFire = time;
+
+    const target = findNearestEnemy();
+    if (!target) return;
+
+    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+    this.throwStormSword(angle);
+  }
+
+  throwStormSword(angle) {
+    const speed = 540;
+    const maxDist = 550;
+    const size = 18;
+    let dist = 0;
+    let returning = false;
+    let lastX = player.x;
+    let lastY = player.y;
+    const hitEnemies = new Set();
+
+    const blade = this.scene.add.rectangle(player.x, player.y, size * 3.5, size * 0.6, 0x44ffcc, 0.93).setDepth(33);
+    this.scene.physics.add.existing(blade);
+    blade.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+
+    const spinTween = this.scene.tweens.add({
+      targets: blade, rotation: { from: 0, to: Math.PI * 2 }, duration: 350, repeat: -1,
+    });
+
+    const timer = this.scene.time.addEvent({
+      delay: 16, loop: true,
+      callback: () => {
+        if (!blade.active) { timer.destroy(); spinTween.stop(); return; }
+
+        dist += Phaser.Math.Distance.Between(lastX, lastY, blade.x, blade.y);
+        lastX = blade.x; lastY = blade.y;
+
+        // 트레일
+        const trail = this.scene.add.rectangle(blade.x, blade.y, 20, 5, 0x44ffcc, 0.25).setDepth(30);
+        this.scene.tweens.add({
+          targets: trail, alpha: 0, duration: 180,
+          onComplete: () => trail.destroy(),
+        });
+
+        // 피해
+        enemies.getChildren().forEach((enemy) => {
+          if (!enemy.active || hitEnemies.has(enemy)) return;
+          if (Phaser.Math.Distance.Between(blade.x, blade.y, enemy.x, enemy.y) < size * 2) {
+            hitEnemies.add(enemy);
+            damageEnemy.call(this.scene, enemy, 8.5);
+          }
+        });
+
+        if (!returning && dist >= maxDist) {
+          returning = true;
+          hitEnemies.clear();
+          // 회오리 소환
+          this.spawnWhirlwind(blade.x, blade.y);
+        }
+
+        if (returning) {
+          const ra = Phaser.Math.Angle.Between(blade.x, blade.y, player.x, player.y);
+          blade.body.setVelocity(Math.cos(ra) * speed * 1.15, Math.sin(ra) * speed * 1.15);
+
+          enemies.getChildren().forEach((enemy) => {
+            if (!enemy.active || hitEnemies.has(enemy)) return;
+            if (Phaser.Math.Distance.Between(blade.x, blade.y, enemy.x, enemy.y) < size * 2) {
+              hitEnemies.add(enemy);
+              damageEnemy.call(this.scene, enemy, 8.5);
+            }
+          });
+
+          if (Phaser.Math.Distance.Between(blade.x, blade.y, player.x, player.y) < 30) {
+            timer.destroy(); spinTween.stop(); blade.destroy();
+          }
+        }
+      },
+    });
+  }
+
+  spawnWhirlwind(x, y) {
+    let angle = 0;
+    let elapsed = 0;
+    const duration = 1600;
+
+    const timer = this.scene.time.addEvent({
+      delay: 60, loop: true,
+      callback: () => {
+        elapsed += 60;
+        angle += 0.5;
+        const wx = x + Math.cos(angle) * 55;
+        const wy = y + Math.sin(angle) * 55;
+
+        const blade = this.scene.add.arc(wx, wy, 32, -90, 90, false, 0x44ffcc, 0.18)
+          .setAngle(Phaser.Math.RadToDeg(angle)).setStrokeStyle(3, 0xccffee, 0.7).setDepth(30);
+        this.scene.tweens.add({
+          targets: blade, alpha: 0, scale: 1.2, duration: 160,
+          onComplete: () => blade.destroy(),
+        });
+
+        findEnemiesInRange(wx, wy, 80, 4).forEach((enemy) => {
+          damageEnemy.call(this.scene, enemy, 3.5);
+        });
+
+        if (elapsed >= duration) timer.destroy();
+      },
+    });
+  }
+}
+
+// 👁️ 역병의 눈
+class PlagueEyeWeapon extends FusionWeapon {
+  constructor(scene) { super(scene, "plagueEye"); }
+
+  tick(time) {
+    if (!this.canFire(time, 4500)) return;
+    this.lastFire = time;
+
+    const pullRadius = 260;
+    const x = player.x + Phaser.Math.FloatBetween(-80, 80);
+    const y = player.y + Phaser.Math.FloatBetween(-80, 80);
+
+    // 눈 이펙트
+    const eyeOuter = this.scene.add.ellipse(x, y, 60, 35, 0x000000, 0.9)
+      .setStrokeStyle(3, 0xaaff44, 0.85).setDepth(52);
+    const pupil = this.scene.add.circle(x, y, 10, 0x44ff44, 0.9).setDepth(53);
+    const glow = this.scene.add.circle(x, y, pullRadius, 0x224400, 0.1)
+      .setStrokeStyle(2, 0x88ff44, 0.3).setDepth(50);
+
+    let elapsed = 0;
+    const duration = 2500;
+    const hitCooldown = new Map();
+
+    const timer = this.scene.time.addEvent({
+      delay: 80, loop: true,
+      callback: () => {
+        elapsed += 80;
+        enemies.getChildren().forEach((enemy) => {
+          if (!enemy.active) return;
+          const d = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
+          if (d > pullRadius) return;
+
+          const a = Phaser.Math.Angle.Between(enemy.x, enemy.y, x, y);
+          enemy.body.setVelocity(Math.cos(a) * 140, Math.sin(a) * 140);
+
+          const last = hitCooldown.get(enemy) || 0;
+          if (this.scene.time.now > last + 300) {
+            hitCooldown.set(enemy, this.scene.time.now);
+            enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, this.scene.time.now + 2000);
+            enemy.poisonDamage = 1.0;
+            damageEnemy.call(this.scene, enemy, 4.0);
+          }
+        });
+
+        if (elapsed >= duration) {
+          timer.destroy();
+          // 독 구름 폭발
+          explode.call(this.scene, x, y, pullRadius, 10.0);
+          findEnemiesInRange(x, y, pullRadius + 80).forEach((enemy) => {
+            enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, this.scene.time.now + 4000);
+            enemy.poisonDamage = 1.2;
+          });
+
+          // 독 구름 시각
+          const cloud = this.scene.add.circle(x, y, pullRadius, 0x44aa22, 0.15)
+            .setStrokeStyle(2, 0x88ff44, 0.4).setDepth(36);
+          this.scene.tweens.add({
+            targets: cloud, alpha: 0, scale: 1.4, duration: 1500,
+            onComplete: () => cloud.destroy(),
+          });
+
+          eyeOuter.destroy(); pupil.destroy(); glow.destroy();
+        }
+      },
+    });
+
+    this.scene.tweens.add({
+      targets: [eyeOuter, pupil],
+      scaleX: { from: 0.2, to: 1 }, scaleY: { from: 0.2, to: 1 },
+      duration: 300, ease: "Back.easeOut",
+    });
+  }
+}
+
+// ☄️ 플라즈마 빔
+class PlasmaBeamWeapon extends FusionWeapon {
+  constructor(scene) {
+    super(scene, "plasmaBeam");
+    this.spinAngle = 0;
+  }
+
+  tick(time, delta) {
+    if (!this.canFire(time, 1100)) return;
+    this.lastFire = time;
+
+    const targets = findEnemiesInRange(player.x, player.y, 900, 3);
+    targets.forEach((t) => {
+      const angle = Phaser.Math.Angle.Between(player.x, player.y, t.x, t.y);
+      const endX = player.x + Math.cos(angle) * 850;
+      const endY = player.y + Math.sin(angle) * 850;
+      showLaserBeam(this.scene, player.x, player.y, endX, endY, false);
+
+      // 레이저 경로 적에게 낙뢰
+      enemies.getChildren().forEach((enemy) => {
+        if (!enemy.active) return;
+        const d = distanceToSegment(enemy.x, enemy.y, player.x, player.y, endX, endY);
+        if (d <= 30) {
+          damageEnemy.call(this.scene, enemy, 7.0);
+          showLightningStrike(this.scene, enemy.x, enemy.y, false);
+          enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, time + 500);
+
+          // 주변 감전 연쇄
+          findEnemiesInRange(enemy.x, enemy.y, 180, 3).forEach((nearby) => {
+            if (nearby !== enemy) {
+              damageEnemy.call(this.scene, nearby, 3.5);
+              showLightningStrike(this.scene, nearby.x, nearby.y, false);
+            }
+          });
+        }
+      });
+    });
+  }
+}
+
+// 💥 폭발 부메랑
+class ExplosiveBoomWeapon extends FusionWeapon {
+  constructor(scene) { super(scene, "explosiveBoom"); }
+
+  tick(time) {
+    if (!this.canFire(time, 2200)) return;
+    this.lastFire = time;
+
+    const target = findNearestEnemy();
+    if (!target) return;
+
+    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+    this.throwExplosiveBoom(angle);
+  }
+
+  throwExplosiveBoom(angle) {
+    const speed = 500;
+    const maxDist = 580;
+    const size = 14;
+    let dist = 0;
+    let returning = false;
+    let lastX = player.x;
+    let lastY = player.y;
+    let nextExplosion = 0;
+
+    const body = this.scene.add.rectangle(player.x, player.y, size * 3, size * 0.7, 0xffaa33, 0.92).setDepth(33);
+    this.scene.physics.add.existing(body);
+    body.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+
+    const spinTween = this.scene.tweens.add({
+      targets: body, rotation: { from: 0, to: Math.PI * 2 }, duration: 380, repeat: -1,
+    });
+
+    const timer = this.scene.time.addEvent({
+      delay: 16, loop: true,
+      callback: () => {
+        if (!body.active) { timer.destroy(); spinTween.stop(); return; }
+
+        dist += Phaser.Math.Distance.Between(lastX, lastY, body.x, body.y);
+        lastX = body.x; lastY = body.y;
+
+        // 경로마다 폭발
+        if (this.scene.time.now > nextExplosion) {
+          nextExplosion = this.scene.time.now + 180;
+          explode.call(this.scene, body.x, body.y, 80, 5.0);
+        }
+
+        if (!returning && dist >= maxDist) {
+          returning = true;
+          explode.call(this.scene, body.x, body.y, 130, 8.0);
+        }
+
+        if (returning) {
+          const ra = Phaser.Math.Angle.Between(body.x, body.y, player.x, player.y);
+          body.body.setVelocity(Math.cos(ra) * speed * 1.1, Math.sin(ra) * speed * 1.1);
+
+          if (Phaser.Math.Distance.Between(body.x, body.y, player.x, player.y) < 30) {
+            timer.destroy(); spinTween.stop(); body.destroy();
+          }
+        }
+      },
+    });
+  }
+}
+
+// 🚀 다연장 추적포
+class MultiMissileWeapon extends FusionWeapon {
+  constructor(scene) {
+    super(scene, "multiMissile");
+    this.lastDrone = 0;
+  }
+
+  tick(time) {
+    if (!this.canFire(time, 120)) return;
+    this.lastFire = time;
+
+    for (let i = 0; i < 2; i++) {
+      const target = findNearestEnemy();
+      if (!target) return;
+      const bullet = createProjectile(this.scene, player.x + i * 12 - 6, player.y, 0xff66aa, 8);
+      bullet.damage = 4.5;
+      bullet.homing = true;
+      bullet.target = target;
+      bullet.speed = 520;
+      bullet.explodeRadius = 55;
+      bullet.explodeDamage = 2.5;
+      bullet.trailColor = 0xff66aa;
+      bullet.trailSize = 8;
+      this.scene.physics.moveToObject(bullet, target, bullet.speed);
+
+      const aura = this.scene.add.circle(player.x, player.y, 14, 0xff66aa, 0.18).setDepth(32);
+      this.scene.tweens.add({
+        targets: aura, alpha: 0, scale: 2.0, duration: 180,
+        onComplete: () => aura.destroy(),
+      });
+    }
+
+    // 드론 미사일
+    if (time > this.lastDrone + 500) {
+      this.lastDrone = time;
+      [-60, 60].forEach((offset) => {
+        const t = findNearestEnemy();
+        if (!t) return;
+        const bullet = createProjectile(this.scene, player.x + offset, player.y - 30, 0xff66aa, 6);
+        bullet.damage = 3.0;
+        bullet.homing = true;
+        bullet.target = t;
+        bullet.speed = 490;
+        bullet.explodeRadius = 45;
+        bullet.explodeDamage = 1.8;
+        bullet.trailColor = 0xff66aa;
+        this.scene.physics.moveToObject(bullet, t, bullet.speed);
+      });
+    }
+  }
+}
+
+// 💀 사신의 낫
+class DeathScytheWeapon extends FusionWeapon {
+  constructor(scene) {
+    super(scene, "deathScythe");
+    this.swingAngle = 0;
+  }
+
+  tick(time) {
+    if (!this.canFire(time, 1500)) return;
+    this.lastFire = time;
+
+    const target = findNearestEnemy();
+    const range = 240;
+    const baseAngle = target
+      ? Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y)
+      : this.swingAngle;
+
+    this.swingAngle = baseAngle;
+
+    // 낫 이펙트
+    const arc = this.scene.add.arc(player.x, player.y, range, -80, 80, false, 0xccffaa, 0.15)
+      .setAngle(Phaser.Math.RadToDeg(baseAngle)).setStrokeStyle(12, 0xccffaa, 0.88).setDepth(29);
+    const edge = this.scene.add.arc(player.x, player.y, range + 16, -72, 72, false, 0xffffff, 0)
+      .setAngle(Phaser.Math.RadToDeg(baseAngle)).setStrokeStyle(3, 0xeeffdd, 0.95).setDepth(30);
+
+    this.scene.tweens.add({
+      targets: [arc, edge], alpha: 0, scale: 1.1, duration: 260, ease: "Cubic.easeOut",
+      onComplete: () => { arc.destroy(); edge.destroy(); },
+    });
+
+    // 낫 범위 피해
+    const hitEnemies = new Set();
+    findEnemiesInRange(player.x, player.y, range).forEach((enemy) => {
+      const ea = Phaser.Math.Angle.Between(player.x, player.y, enemy.x, enemy.y);
+      const diff = Phaser.Math.Angle.Wrap(ea - baseAngle);
+      if (Math.abs(diff) <= 1.4) {
+        hitEnemies.add(enemy);
+        damageEnemy.call(this.scene, enemy, 10.0);
+      }
+    });
+
+    // 사슬 연결 + 끌어당기기
+    const chainTargets = findEnemiesInRange(player.x, player.y, 500, 4)
+      .filter((e) => !hitEnemies.has(e));
+
+    chainTargets.forEach((enemy, i) => {
+      this.scene.time.delayedCall(i * 80, () => {
+        if (!enemy.active) return;
+
+        // 전기 사슬 그리기
+        const g = this.scene.add.graphics().setDepth(48);
+        const drawLine = () => {
+          g.clear();
+          g.lineStyle(6, 0xccffaa, 0.12);
+          g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(enemy.x, enemy.y); g.strokePath();
+          g.lineStyle(1.5, 0xeeffdd, 0.85);
+          g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(enemy.x, enemy.y); g.strokePath();
+        };
+        drawLine();
+
+        // 끌어당기며 피해
+        let elapsed = 0;
+        const pullTimer = this.scene.time.addEvent({
+          delay: 16, loop: true,
+          callback: () => {
+            elapsed += 16;
+            if (!enemy.active) { pullTimer.destroy(); g.destroy(); return; }
+            drawLine();
+
+            const a = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
+            enemy.body.setVelocity(Math.cos(a) * 200, Math.sin(a) * 200);
+
+            if (elapsed >= 600) {
+              pullTimer.destroy();
+              g.destroy();
+              if (enemy.active) damageEnemy.call(this.scene, enemy, 8.0);
+            }
+          },
+        });
+      });
+    });
   }
 }
