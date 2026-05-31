@@ -1697,6 +1697,7 @@ function applyContactDamage(delta) {
       duration: 60,
       yoyo: true,
     });
+     showBloodEffect.call(this, player.x, player.y);
   }
 
   if (playerHp <= 0) {
@@ -1892,4 +1893,55 @@ const startGame = () => {
 
   btnBg.on("pointerdown", startGame);
   btnText.on("pointerdown", startGame);
+}
+
+function showBloodEffect(x, y) {
+  const centerX = x;
+  const centerY = y + 20; // 머리에서 몸통으로 내림
+
+  const count = Phaser.Math.Between(14, 20); // 양 증가
+
+  for (let i = 0; i < count; i++) {
+    const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+    const size = Phaser.Math.FloatBetween(4, 9);
+    const dist = Phaser.Math.FloatBetween(25, 75);
+
+    // 핏방울 — 진한 빨강/검붉은 색 랜덤
+    const colors = [0xff0000, 0xdd0000, 0xbb0011, 0x990000, 0xff1122];
+    const color = colors[Phaser.Math.Between(0, colors.length - 1)];
+    const drop = this.add.circle(centerX, centerY, size, color, 1.0).setDepth(60);
+
+    this.tweens.add({
+      targets: drop,
+      x: centerX + Math.cos(angle) * dist,
+      y: centerY + Math.sin(angle) * dist,
+      alpha: 0,
+      scale: 0.15,
+      duration: Phaser.Math.Between(200, 420),
+      ease: "Cubic.easeOut",
+      onComplete: () => drop.destroy(),
+    });
+  }
+
+  // 큰 번짐
+  const splat1 = this.add.circle(centerX, centerY, 20, 0xcc0000, 0.7).setDepth(59);
+  this.tweens.add({
+    targets: splat1,
+    alpha: 0,
+    scale: 2.2,
+    duration: 350,
+    ease: "Cubic.easeOut",
+    onComplete: () => splat1.destroy(),
+  });
+
+  // 작은 번짐 추가
+  const splat2 = this.add.circle(centerX, centerY, 10, 0xff0011, 0.85).setDepth(59);
+  this.tweens.add({
+    targets: splat2,
+    alpha: 0,
+    scale: 1.5,
+    duration: 200,
+    ease: "Cubic.easeOut",
+    onComplete: () => splat2.destroy(),
+  });
 }
