@@ -120,10 +120,9 @@ const playerVelocity = {
 };
 
 function preload() {
-  this.load.spritesheet("player", "assets/Soldier-Walk.png", {
-    frameWidth: 100,
-    frameHeight: 100,
-  });
+  for (let i = 1; i <= 6; i++) {
+    this.load.image(`player_${i}`, `assets/hero-run-${i}.png`);
+  }
 }
 
 function create() {
@@ -134,22 +133,29 @@ function create() {
 
   this.add.rectangle(0, 0, 10000, 10000, 0x050814).setOrigin(0);
 
-  player = this.physics.add.sprite(640, 360, "player");
-player.setDisplaySize(200, 200);
+player = this.physics.add.sprite(640, 360, "player_1");
+player.setDisplaySize(120, 120);
 player.body.setDrag(800);
 player.body.setMaxVelocity(400);
-player.body.setSize(180, 180); // 충돌 범위 (표시 크기보다 약간 작게)
+player.body.setSize(75, 75);
 
 this.anims.create({
   key: "walk",
-  frames: this.anims.generateFrameNumbers("player", { start: 0, end: 7 }),
+  frames: [
+    { key: "player_1" },
+    { key: "player_2" },
+    { key: "player_3" },
+    { key: "player_4" },
+    { key: "player_5" },
+    { key: "player_6" },
+  ],
   frameRate: 10,
   repeat: -1,
 });
 
 this.anims.create({
   key: "idle",
-  frames: this.anims.generateFrameNumbers("player", { start: 0, end: 0 }),
+  frames: [{ key: "player_1" }],
   frameRate: 1,
   repeat: -1,
 });
