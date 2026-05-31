@@ -113,6 +113,10 @@ let isDead = false;
 let lastDamageTime = 0;
 const CONTACT_DAMAGE_PER_SEC = 34; // 약 3초 버티면 죽음
 let gameStartTime = 0;
+let devMode = false;
+let devPanelEl = null;
+let gameSceneRef = null;
+let devBtnEl = null;
 
 const playerVelocity = {
   x: 0,
@@ -126,6 +130,8 @@ function preload() {
 }
 
 function create() {
+  gameSceneRef = this;
+
   // 모바일 멀티터치 등록
   this.input.addPointer(2);
 
@@ -198,6 +204,7 @@ gameStartTime = this.time.now;
     exp++;
 
     if (exp >= expToNextLevel) {
+       if (devMode) return;
       level++;
       exp = 0;
       expToNextLevel += Math.floor(expToNextLevel * 0.4 + 4);
@@ -281,6 +288,7 @@ healthBarGreen = this.add.rectangle(
 
   updateCameraZoom.call(this, this.scale.width);
   showStartScreen.call(this);
+  createDevConsole();
 }
 
 function update(time, delta) {
@@ -1310,22 +1318,22 @@ class SwordWeapon extends AutoWeapon {
     });
   }
 
-  swordWave() {
-    const target = findNearestEnemy();
-    if (!target) return;
+ swordWave() {
+  const target = findNearestEnemy();
+  if (!target) return;
 
-    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
-    const wave = this.scene.add.arc(player.x, player.y, 42, -62, 62, false, 0xffd1dc, 0.2)
-      .setStrokeStyle(12, 0xffffff, 0.75).setRotation(angle).setScale(1.25, 0.85).setDepth(31);
+  const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+  const wave = this.scene.add.arc(player.x, player.y, 90, -75, 75, false, 0xffd1dc, 0.25)
+    .setStrokeStyle(18, 0xffffff, 0.85).setRotation(angle).setScale(1.6, 1.1).setDepth(31);
 
-    this.scene.physics.add.existing(wave);
-    wave.body.setSize(76, 54);
-    bullets.add(wave);
-    wave.damage = getWeaponDamage(this.type, this.level) * 0.8;
-    wave.trailColor = 0xffd1dc;
-    wave.trailSize = 18;
-    this.scene.physics.moveToObject(wave, target, 520);
-  }
+  this.scene.physics.add.existing(wave);
+  wave.body.setSize(160, 100);
+  bullets.add(wave);
+  wave.damage = getWeaponDamage(this.type, this.level) * 0.8;
+  wave.trailColor = 0xffd1dc;
+  wave.trailSize = 28;
+  this.scene.physics.moveToObject(wave, target, 520);
+}
 }
 
 class LaserWeapon extends AutoWeapon {
@@ -1661,7 +1669,7 @@ function createWeapon(scene, type) {
 
 function applyContactDamage(delta) {
   if (isDead) return;
-
+  if (devMode) return; // ← 추가
   let touchingEnemy = false;
 
   enemies.getChildren().forEach((enemy) => {
@@ -1944,4 +1952,251 @@ function showBloodEffect(x, y) {
     ease: "Cubic.easeOut",
     onComplete: () => splat2.destroy(),
   });
+}
+
+function createDevConsole() {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "...";
+  input.style.cssText = `
+    position: fixed;
+    bottom: 12px;
+    right: 12px;
+    width: 140px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.08);
+    font-size: 12px;
+    outline: none;
+    z-index: 99999;
+    caret-color: rgba(255,255,255,0.3);
+  `;
+  document.body.appendChild(input);
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const val = input.value.trim();
+    input.value = "";
+    input.blur();
+
+if (val === "소드마스터") {
+  devMode = !devMode;
+  showDevNotice(devMode ? "⚔ DEV MODE ON" : "DEV MODE OFF", devMode ? "#00ffd5" : "#ff4444");
+  if (devMode) createDevButton();
+  else {
+    removeDevPanel();
+    removeDevButton();
+  }
+}
+  });
+}
+
+function showDevNotice(msg, color) {
+  const el = document.createElement("div");
+  el.textContent = msg;
+  el.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: ${color};
+    font-size: 28px;
+    font-weight: bold;
+    font-family: monospace;
+    letter-spacing: 4px;
+    z-index: 99999;
+    pointer-events: none;
+    text-shadow: 0 0 20px ${color};
+    transition: opacity 0.5s;
+  `;
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity = "0"; }, 800);
+  setTimeout(() => el.remove(), 1300);
+}
+
+function showDevPanel() {
+  removeDevPanel();
+
+  const panel = document.createElement("div");
+  panel.id = "dev-panel";
+  panel.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10, 14, 26, 0.97);
+    border: 1px solid #00ffd5;
+    border-radius: 10px;
+    padding: 20px 24px;
+    z-index: 99999;
+    color: #ffffff;
+    font-family: monospace;
+    min-width: 320px;
+    box-shadow: 0 0 30px rgba(0,255,213,0.15);
+  `;
+
+  const title = document.createElement("div");
+  title.textContent = "⚔ DEV MODE";
+  title.style.cssText = "color: #00ffd5; font-size: 16px; font-weight: bold; letter-spacing: 3px; margin-bottom: 16px;";
+  panel.appendChild(title);
+
+  WEAPON_TYPES.forEach((weapon) => {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; align-items: center; gap: 10px; margin-bottom: 10px;";
+
+    const label = document.createElement("span");
+    label.textContent = weapon.name;
+    label.style.cssText = "width: 100px; font-size: 13px; color: #b7f7ff;";
+
+    const select = document.createElement("select");
+    select.style.cssText = `
+      background: #1a2030;
+      border: 1px solid #334;
+      color: #fff;
+      padding: 3px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    `;
+
+    const noneOpt = document.createElement("option");
+    noneOpt.value = "0";
+    noneOpt.textContent = "없음";
+    select.appendChild(noneOpt);
+
+    for (let i = 1; i <= 5; i++) {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = `Lv.${i}`;
+      select.appendChild(opt);
+    }
+
+    // 현재 보유 레벨 반영
+    const owned = weaponManager.getWeapon(weapon.id);
+    select.value = owned ? String(owned.level) : "0";
+
+    select.addEventListener("change", () => {
+      const lv = parseInt(select.value);
+      if (lv === 0) {
+        // 무기 제거
+        weaponManager.weapons = weaponManager.weapons.filter((w) => w.type !== weapon.id);
+      } else {
+        const existing = weaponManager.getWeapon(weapon.id);
+        if (existing) {
+          existing.level = lv;
+        } else {
+          if (weaponManager.weapons.length < weaponManager.maxWeapons) {
+            weaponManager.addOrUpgrade(weapon.id);
+            const added = weaponManager.getWeapon(weapon.id);
+            if (added) added.level = lv;
+          } else {
+            showDevNotice("슬롯 가득참! (최대 3개)", "#ff4444");
+            select.value = "0";
+            return;
+          }
+        }
+      }
+      updateWeaponHud();
+    });
+
+    row.appendChild(label);
+    row.appendChild(select);
+    panel.appendChild(row);
+  });
+
+  // 최대 무기 슬롯 조절
+  const slotRow = document.createElement("div");
+  slotRow.style.cssText = "display: flex; align-items: center; gap: 10px; margin-top: 14px; border-top: 1px solid #223; padding-top: 12px;";
+  const slotLabel = document.createElement("span");
+  slotLabel.textContent = "무기 슬롯";
+  slotLabel.style.cssText = "width: 100px; font-size: 13px; color: #b7f7ff;";
+  const slotSelect = document.createElement("select");
+  slotSelect.style.cssText = `
+    background: #1a2030;
+    border: 1px solid #334;
+    color: #fff;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  `;
+  for (let i = 1; i <= 8; i++) {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = `${i}개`;
+    if (i === weaponManager.maxWeapons) opt.selected = true;
+    slotSelect.appendChild(opt);
+  }
+  slotSelect.addEventListener("change", () => {
+    weaponManager.maxWeapons = parseInt(slotSelect.value);
+  });
+  slotRow.appendChild(slotLabel);
+  slotRow.appendChild(slotSelect);
+  panel.appendChild(slotRow);
+
+  // 닫기 버튼
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "닫기";
+  closeBtn.style.cssText = `
+    margin-top: 16px;
+    width: 100%;
+    background: transparent;
+    border: 1px solid #00ffd5;
+    color: #00ffd5;
+    padding: 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 13px;
+    letter-spacing: 2px;
+  `;
+  closeBtn.addEventListener("click", () => removeDevPanel());
+  panel.appendChild(closeBtn);
+
+  document.body.appendChild(panel);
+  devPanelEl = panel;
+}
+
+function removeDevPanel() {
+  if (devPanelEl) {
+    devPanelEl.remove();
+    devPanelEl = null;
+  }
+}
+
+function createDevButton() {
+  removeDevButton();
+
+  const btn = document.createElement("button");
+  btn.textContent = "⚔ DEV";
+  btn.style.cssText = `
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10, 14, 26, 0.85);
+    border: 1px solid #00ffd5;
+    color: #00ffd5;
+    padding: 6px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 13px;
+    letter-spacing: 3px;
+    z-index: 99999;
+  `;
+
+  btn.addEventListener("click", () => {
+    if (devPanelEl) removeDevPanel();
+    else showDevPanel();
+  });
+
+  document.body.appendChild(btn);
+  devBtnEl = btn;
+}
+
+function removeDevButton() {
+  if (devBtnEl) {
+    devBtnEl.remove();
+    devBtnEl = null;
+  }
 }
