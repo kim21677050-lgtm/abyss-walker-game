@@ -2696,35 +2696,100 @@ class ChainWeapon extends AutoWeapon {
   }
 
   drawChainLine(from, to) {
-    const line = this.scene.add.graphics().setDepth(48);
-    this.updateChainLine(line, from, to);
-    return line;
+  const line = this.scene.add.graphics().setDepth(48);
+  line._from = from;
+  line._to = to;
+  this.updateChainLine(line, from, to);
+  return line;
+}
+
+updateChainLine(graphics, from, to) {
+  graphics.clear();
+
+  const segments = 10;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  if (length < 1) return;
+
+  // 수직 방향 (지그재그용)
+  const perpX = -dy / length;
+  const perpY = dx / length;
+
+  // 매 프레임 랜덤 지그재그 포인트 생성
+  const points = [];
+  points.push({ x: from.x, y: from.y });
+
+  for (let i = 1; i < segments; i++) {
+    const t = i / segments;
+    const baseX = from.x + dx * t;
+    const baseY = from.y + dy * t;
+    const jitter = Phaser.Math.FloatBetween(-22, 22);
+    points.push({
+      x: baseX + perpX * jitter,
+      y: baseY + perpY * jitter,
+    });
   }
 
-  updateChainLine(graphics, from, to) {
-    graphics.clear();
-    // 글로우
-    graphics.lineStyle(10, 0x4488ff, 0.12);
-    graphics.beginPath();
-    graphics.moveTo(from.x, from.y);
-    graphics.lineTo(to.x ?? to.x, to.y ?? to.y);
-    graphics.strokePath();
-    // 코어
-    graphics.lineStyle(2.5, 0x88bbff, 0.85);
-    graphics.beginPath();
-    graphics.moveTo(from.x, from.y);
-    graphics.lineTo(to.x, to.y);
-    graphics.strokePath();
-    // 세그먼트 노드
-    const segments = 5;
-    for (let i = 1; i < segments; i++) {
-      const t = i / segments;
-      const nx = from.x + (to.x - from.x) * t;
-      const ny = from.y + (to.y - from.y) * t;
-      graphics.fillStyle(0xaaccff, 0.6);
-      graphics.fillCircle(nx, ny, 3);
-    }
+  points.push({ x: to.x, y: to.y });
+
+  // 외곽 글로우 (넓고 흐릿하게)
+  graphics.lineStyle(14, 0x4466ff, 0.08);
+  graphics.beginPath();
+  graphics.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    graphics.lineTo(points[i].x, points[i].y);
   }
+  graphics.strokePath();
+
+  // 중간 글로우
+  graphics.lineStyle(6, 0x88aaff, 0.22);
+  graphics.beginPath();
+  graphics.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    graphics.lineTo(points[i].x, points[i].y);
+  }
+  graphics.strokePath();
+
+  // 코어 (밝고 선명하게)
+  graphics.lineStyle(1.8, 0xddeeff, 0.95);
+  graphics.beginPath();
+  graphics.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    graphics.lineTo(points[i].x, points[i].y);
+  }
+  graphics.strokePath();
+
+  // 분기 번개 (2~3개 랜덤)
+  const branchCount = Phaser.Math.Between(2, 3);
+  for (let b = 0; b < branchCount; b++) {
+    const startIdx = Phaser.Math.Between(2, points.length - 3);
+    const startPt = points[startIdx];
+    const branchDir = Math.random() < 0.5 ? 1 : -1;
+    const branchLen = Phaser.Math.FloatBetween(18, 38);
+    const branchAngle = Math.atan2(dy, dx) + branchDir * Phaser.Math.FloatBetween(0.5, 1.1);
+
+    const midX = startPt.x + Math.cos(branchAngle) * branchLen * 0.5 + Phaser.Math.FloatBetween(-8, 8);
+    const midY = startPt.y + Math.sin(branchAngle) * branchLen * 0.5 + Phaser.Math.FloatBetween(-8, 8);
+    const endX = startPt.x + Math.cos(branchAngle) * branchLen;
+    const endY = startPt.y + Math.sin(branchAngle) * branchLen;
+
+    graphics.lineStyle(1.2, 0xaaccff, 0.55);
+    graphics.beginPath();
+    graphics.moveTo(startPt.x, startPt.y);
+    graphics.lineTo(midX, midY);
+    graphics.lineTo(endX, endY);
+    graphics.strokePath();
+  }
+
+  // 연결점 스파크 (from, to 양 끝)
+  [from, to].forEach((pt) => {
+    graphics.fillStyle(0xffffff, 0.9);
+    graphics.fillCircle(pt.x, pt.y, 4.5);
+    graphics.fillStyle(0x88aaff, 0.5);
+    graphics.fillCircle(pt.x, pt.y, 9);
+  });
+}
 
   clearChains() {
     this.activeChains.forEach((obj) => { if (obj?.active) obj.destroy(); });
