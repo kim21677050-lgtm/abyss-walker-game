@@ -2464,7 +2464,8 @@ class BoomerangWeapon extends AutoWeapon {
     boomBody.damage = damage;
     boomBody.trailColor = color;
     boomBody.trailSize = size * 0.5;
-    bullets.add(boomBody);
+    // 변경 — bullets 그룹에 추가하지 않고 physics만 적용
+this.scene.physics.add.existing(boomBody);
 
     const vx = Math.cos(angle) * speed;
     const vy = Math.sin(angle) * speed;
