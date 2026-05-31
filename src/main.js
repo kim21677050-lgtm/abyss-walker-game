@@ -43,8 +43,17 @@ function create() {
   // 월드 크기
   this.physics.world.setBounds(-3000, -3000, 6000, 6000);
 
+// 🌌 배경 분위기 (사이버 느낌)
+this.add.rectangle(
+  0,
+  0,
+  10000,
+  10000,
+  0x050814 // 완전 검정 대신 푸른 다크톤
+).setOrigin(0);
+
   // 플레이어
-  player = this.add.rectangle(640, 360, 40, 40, 0xffffff);
+  player = this.add.rectangle(640, 360, 40, 40, 0x00ffd5); // 청록 네온
   this.physics.add.existing(player);
 
   player.body.setDrag(800);
@@ -82,18 +91,30 @@ expOrbs = this.physics.add.group();
 
       enemy.hp--;
 
-      if (enemy.hp <= 0) {
+      // =========================
+// 💀 적이 죽었을 때
+// =========================
+if (enemy.hp <= 0) {
 
+  // =========================
+  // 💥 경험치 구슬 생성
+  // =========================
   const orb = this.add.circle(
-    enemy.x,
-    enemy.y,
-    8,
-    0x00aaff
+    enemy.x,   // 적 위치 X
+    enemy.y,   // 적 위치 Y
+    7,         // 크기
+    0x66ccff   // 파란색 (경험치 느낌)
   );
 
+  // 물리 적용 (중요)
   this.physics.add.existing(orb);
+
+  // 그룹에 추가 (흡수 시스템 때문에 필수)
   expOrbs.add(orb);
 
+  // =========================
+  // 💀 적 제거
+  // =========================
   enemy.destroy();
 }
     }
@@ -149,6 +170,10 @@ this.time.delayedCall(1000, () => {
 }
   }
 );
+
+// 🎮 전체 밝기 느낌 강화
+this.cameras.main.setZoom(1.05); // 살짝 확대 느낌
+
 }
 
 function update(time) {
@@ -254,11 +279,11 @@ function shootBullet() {
   if (!nearestEnemy) return;
 
   const bullet = this.add.circle(
-    player.x,
-    player.y,
-    8,
-    0xffff00
-  );
+  player.x,
+  player.y,
+  6,
+  0xffff66 // 밝은 에너지 노랑
+);
 
   this.physics.add.existing(bullet);
   bullets.add(bullet);
