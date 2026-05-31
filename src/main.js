@@ -1122,7 +1122,7 @@ class WeaponManager {
   constructor(scene) {
     this.scene = scene;
     this.weapons = [];
-    this.maxWeapons = 3;
+    this.maxWeapons = 5;
   }
 
   addOrUpgrade(type) {
@@ -1367,23 +1367,57 @@ class LaserWeapon extends AutoWeapon {
     this.lastSpin = 0;
   }
 
-  tick(time, delta) {
-    if (this.canFire(time)) {
-      this.lastFire = time;
+// 변경
+tick(time, delta) {
+  if (this.canFire(time)) {
+    this.lastFire = time;
+
+    if (this.level >= 3) {
+      // Lv3+ : 가장 가까운 적 2마리를 각각 조준
+      const targets = findEnemiesInRange(player.x, player.y, 900, 2);
+      if (targets.length === 0) return;
+
+      targets.forEach((t) => {
+        const angle = Phaser.Math.Angle.Between(player.x, player.y, t.x, t.y);
+        this.fireLaser(angle, 780, this.level >= 4);
+      });
+
+      // 타겟이 1마리뿐이면 살짝 벌어진 2번째 레이저 추가
+      if (targets.length === 1) {
+        const angle = Phaser.Math.Angle.Between(player.x, player.y, targets[0].x, targets[0].y);
+        this.fireLaser(angle + 0.12, 780, this.level >= 4);
+      }
+
+    } else if (this.level >= 2) {
+      // Lv2 : 가장 가까운 적 2마리 각각 조준
+      const targets = findEnemiesInRange(player.x, player.y, 900, 2);
+      if (targets.length === 0) return;
+
+      targets.forEach((t) => {
+        const angle = Phaser.Math.Angle.Between(player.x, player.y, t.x, t.y);
+        this.fireLaser(angle, 780, false);
+      });
+
+      if (targets.length === 1) {
+        const angle = Phaser.Math.Angle.Between(player.x, player.y, targets[0].x, targets[0].y);
+        this.fireLaser(angle + 0.12, 780, false);
+      }
+
+    } else {
+      // Lv1 : 단일 조준
       const target = findNearestEnemy();
       if (!target) return;
-
-      const baseAngle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
-      const angles = this.level >= 3 ? [baseAngle - 0.16, baseAngle + 0.16] : [baseAngle];
-      angles.forEach((angle) => this.fireLaser(angle, this.level >= 2 ? 780 : 560, this.level >= 4));
-    }
-
-    if (this.level >= 5 && time > this.lastSpin + 180) {
-      this.lastSpin = time;
-      this.spinAngle += delta * 0.006 + 0.22;
-      this.fireLaser(this.spinAngle, 700, true, getWeaponDamage(this.type, this.level) * 0.35);
+      const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+      this.fireLaser(angle, 560, false);
     }
   }
+
+  if (this.level >= 5 && time > this.lastSpin + 180) {
+    this.lastSpin = time;
+    this.spinAngle += delta * 0.006 + 0.22;
+    this.fireLaser(this.spinAngle, 700, true, getWeaponDamage(this.type, this.level) * 0.35);
+  }
+}
 
   fireLaser(angle, length, burn = false, damage = getWeaponDamage("laser", this.level)) {
     const endX = player.x + Math.cos(angle) * length;
