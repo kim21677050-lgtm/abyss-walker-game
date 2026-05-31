@@ -229,6 +229,9 @@ let devMode = false;
 let devPanelEl = null;
 let gameSceneRef = null;
 let devBtnEl = null;
+let bgChunks = new Map(); // 청크 캐시
+const CHUNK_SIZE = 512;   // 청크 하나의 픽셀 크기
+const CHUNK_RENDER_RADIUS = 3; // 플레이어 주변 몇 청크까지 그릴지
 
 const playerVelocity = {
   x: 0,
@@ -249,13 +252,15 @@ function create() {
 
   this.physics.world.setBounds(-3000, -3000, 6000, 6000);
 
-  this.add.rectangle(0, 0, 10000, 10000, 0x050814).setOrigin(0);
+  // ─── 던전 배경 타일 ───────────────────────────────────────
 
 player = this.physics.add.sprite(640, 360, "player_1");
 player.setDisplaySize(120, 120);
 player.body.setDrag(800);
 player.body.setMaxVelocity(400);
 player.body.setSize(75, 75);
+
+initInfiniteBackground.call(this);
 
 this.anims.create({
   key: "walk",
@@ -404,6 +409,7 @@ healthBarGreen = this.add.rectangle(
 }
 
 function update(time, delta) {
+  updateInfiniteBackground.call(this)
   if (isChoosingWeapon) {
     return;
   }
@@ -3928,4 +3934,196 @@ class DeathScytheWeapon extends FusionWeapon {
       });
     });
   }
+}
+
+function initInfiniteBackground() {
+  // 비네팅 (카메라 고정, 한 번만 생성)
+  const vignette = this.add.graphics().setScrollFactor(0).setDepth(5);
+  const W = this.scale.width;
+  const H = this.scale.height;
+  for (let i = 10; i > 0; i--) {
+    const ratio = i / 10;
+    vignette.fillStyle(0x000000, 0.06 * ratio);
+    vignette.fillRect(
+      W * (1 - ratio) * 0.5,
+      H * (1 - ratio) * 0.5,
+      W * ratio,
+      H * ratio
+    );
+  }
+  // 첫 프레임 청크 미리 생성
+  updateInfiniteBackground.call(this);
+}
+
+function updateInfiniteBackground() {
+  // 플레이어가 속한 청크 좌표
+  const pcx = Math.floor(player.x / CHUNK_SIZE);
+  const pcy = Math.floor(player.y / CHUNK_SIZE);
+
+  const needed = new Set();
+
+  // 주변 청크 목록 계산
+  for (let cx = pcx - CHUNK_RENDER_RADIUS; cx <= pcx + CHUNK_RENDER_RADIUS; cx++) {
+    for (let cy = pcy - CHUNK_RENDER_RADIUS; cy <= pcy + CHUNK_RENDER_RADIUS; cy++) {
+      const key = `${cx},${cy}`;
+      needed.add(key);
+
+      if (!bgChunks.has(key)) {
+        // 새 청크 생성
+        const chunkGraphics = createChunk.call(this, cx, cy);
+        bgChunks.set(key, chunkGraphics);
+      }
+    }
+  }
+
+  // 멀어진 청크 제거
+  for (const [key, graphics] of bgChunks) {
+    if (!needed.has(key)) {
+      graphics.destroy();
+      bgChunks.delete(key);
+    }
+  }
+}
+
+function createChunk(cx, cy) {
+  const tileSize = 64;
+  const tilesPerChunk = Math.ceil(CHUNK_SIZE / tileSize);
+  const startX = cx * CHUNK_SIZE;
+  const startY = cy * CHUNK_SIZE;
+
+  // 청크마다 고정 시드로 난수 생성 (같은 청크는 항상 동일하게)
+  const seed = (cx * 73856093) ^ (cy * 19349663);
+  const rand = mulberry32(seed);
+
+  const g = this.add.graphics().setDepth(-10);
+
+  for (let row = 0; row < tilesPerChunk; row++) {
+    for (let col = 0; col < tilesPerChunk; col++) {
+      const x = startX + col * tileSize;
+      const y = startY + row * tileSize;
+
+      // 전역 타일 좌표로 패턴 결정 (청크 경계에서 끊기지 않게)
+      const globalCol = cx * tilesPerChunk + col;
+      const globalRow = cy * tilesPerChunk + row;
+      const isDark = (globalRow + globalCol) % 2 === 0;
+      const baseColor = isDark ? 0x0d1117 : 0x111820;
+
+      // 타일 채우기
+      g.fillStyle(baseColor, 1);
+      g.fillRect(x, y, tileSize, tileSize);
+
+      // 테두리
+      g.lineStyle(1, 0x1a2535, 0.8);
+      g.strokeRect(x, y, tileSize, tileSize);
+
+      // 입체 하이라이트 (윗면+왼쪽)
+      g.lineStyle(1, 0x1e2d40, 0.5);
+      g.beginPath();
+      g.moveTo(x + 1, y + tileSize - 1);
+      g.lineTo(x + 1, y + 1);
+      g.lineTo(x + tileSize - 1, y + 1);
+      g.strokePath();
+
+      // 입체 그림자 (아랫면+오른쪽)
+      g.lineStyle(1, 0x080c10, 0.6);
+      g.beginPath();
+      g.moveTo(x + tileSize - 1, y + 1);
+      g.lineTo(x + tileSize - 1, y + tileSize - 1);
+      g.lineTo(x + 1, y + tileSize - 1);
+      g.strokePath();
+
+      // 균열 (시드 기반)
+      if (rand() < 0.10) {
+        g.lineStyle(1, 0x060a0e, 0.9);
+        const crackX = x + 10 + Math.floor(rand() * (tileSize - 20));
+        const crackY = y + 10 + Math.floor(rand() * (tileSize - 20));
+        const crackAngle = rand() * Math.PI;
+        const crackLen = 8 + Math.floor(rand() * 14);
+        g.beginPath();
+        g.moveTo(crackX, crackY);
+        g.lineTo(
+          crackX + Math.cos(crackAngle) * crackLen,
+          crackY + Math.sin(crackAngle) * crackLen
+        );
+        g.strokePath();
+
+        if (rand() < 0.5) {
+          const branchAngle = crackAngle + (rand() - 0.5) * 1.6;
+          g.beginPath();
+          g.moveTo(
+            crackX + Math.cos(crackAngle) * crackLen * 0.5,
+            crackY + Math.sin(crackAngle) * crackLen * 0.5
+          );
+          g.lineTo(
+            crackX + Math.cos(branchAngle) * crackLen * 0.55,
+            crackY + Math.sin(branchAngle) * crackLen * 0.55
+          );
+          g.strokePath();
+        }
+      }
+
+      // 이끼 얼룩
+      if (rand() < 0.05) {
+        g.fillStyle(0x0a1a0f, 0.55);
+        g.fillEllipse(
+          x + 12 + Math.floor(rand() * (tileSize - 24)),
+          y + 12 + Math.floor(rand() * (tileSize - 24)),
+          10 + Math.floor(rand() * 14),
+          6 + Math.floor(rand() * 10)
+        );
+      }
+    }
+  }
+
+  // 큰 돌판 이음새 (4타일마다)
+  g.lineStyle(2, 0x0a0f16, 0.9);
+  const seamTiles = 4;
+  for (let col = 0; col <= tilesPerChunk; col++) {
+    const globalCol = cx * tilesPerChunk + col;
+    if (globalCol % seamTiles === 0) {
+      const sx = startX + col * tileSize;
+      g.beginPath();
+      g.moveTo(sx, startY);
+      g.lineTo(sx, startY + CHUNK_SIZE);
+      g.strokePath();
+    }
+  }
+  for (let row = 0; row <= tilesPerChunk; row++) {
+    const globalRow = cy * tilesPerChunk + row;
+    if (globalRow % seamTiles === 0) {
+      const sy = startY + row * tileSize;
+      g.beginPath();
+      g.moveTo(startX, sy);
+      g.lineTo(startX + CHUNK_SIZE, sy);
+      g.strokePath();
+    }
+  }
+
+  // 횃불 빛 (청크당 0~2개, 시드 기반)
+  const lightCount = Math.floor(rand() * 3);
+  for (let i = 0; i < lightCount; i++) {
+    const lx = startX + Math.floor(rand() * CHUNK_SIZE);
+    const ly = startY + Math.floor(rand() * CHUNK_SIZE);
+    const color = rand() < 0.7 ? 0xff8833 : 0x3399ff;
+    const radius = 90 + Math.floor(rand() * 90);
+
+    [0.04, 0.07, 0.11].forEach((alpha, j) => {
+      const r = radius * (1 - j * 0.28);
+      g.fillStyle(color, alpha);
+      g.fillCircle(lx, ly, r);
+    });
+  }
+
+  return g;
+}
+
+// 시드 기반 난수 생성기 (같은 시드 → 항상 같은 결과)
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = seed + 0x6d2b79f5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
 }
