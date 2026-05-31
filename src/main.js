@@ -57,6 +57,27 @@ const WEAPON_TYPES = [
     color: 0x88ffcc,
     desc: ["전방 휩쓸기", "범위 확대", "2회 연속 베기", "관통 낫날", "회오리 소환"],
   },
+  {
+  id: "blackHole",
+  name: "블랙홀",
+  icon: "BH",
+  color: 0xaa44ff,
+  desc: ["적 흡입 후 폭발", "반경+피해 증가", "2개 동시 소환", "흡입 슬로우+폭발 스턴", "미니 블랙홀 3개 생성"],
+},
+{
+  id: "boomerang",
+  name: "부메랑",
+  icon: "BR",
+  color: 0x88ffdd,
+  desc: ["관통 왕복 투사체", "2개 동시 발사", "왕복 2회", "크기+피해 증가", "선회 부메랑 추가"],
+},
+{
+  id: "chain",
+  name: "체인",
+  icon: "CH",
+  color: 0x88bbff,
+  desc: ["적 2마리 사슬 연결", "연결 3마리", "피해 공유", "적 끌어당김", "연결 5마리+사슬 폭발"],
+},
 ];
 
 const config = {
@@ -654,6 +675,9 @@ function getWeaponDamage(type, level) {
     skull:  [3.0, 3.8, 4.6, 5.5, 6.5],
     lung:   [2.8, 3.5, 4.2, 5.2, 6.2],
     scythe: [4.0, 5.0, 6.0, 7.2, 8.5],
+    blackHole: [3.5, 4.5, 5.5, 6.8, 8.2],
+boomerang: [2.0, 2.6, 3.2, 4.0, 4.8],
+chain:     [1.8, 2.3, 2.8, 3.4, 4.2],
   };
 
   return damageTable[type][Math.min(level, 5) - 1];
@@ -1663,6 +1687,9 @@ function createWeapon(scene, type) {
     case "skull":  return new SkullWeapon(scene);
     case "lung":   return new LungWeapon(scene);
     case "scythe": return new ScytheWeapon(scene);
+    case "blackHole": return new BlackHoleWeapon(scene);
+case "boomerang": return new BoomerangWeapon(scene);
+case "chain":     return new ChainWeapon(scene);
     default: throw new Error(`Unknown weapon type: ${type}`);
   }
 }
@@ -2198,5 +2225,509 @@ function removeDevButton() {
   if (devBtnEl) {
     devBtnEl.remove();
     devBtnEl = null;
+  }
+}
+
+// ─── 블랙홀 ───────────────────────────────────────────────
+
+class BlackHoleWeapon extends AutoWeapon {
+  constructor(scene) {
+    super(scene, "blackHole", 5000);
+  }
+
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+
+    const count = this.level >= 3 ? 2 : 1;
+
+    for (let i = 0; i < count; i++) {
+      this.scene.time.delayedCall(i * 400, () => {
+        this.spawnBlackHole(time);
+      });
+    }
+  }
+
+  spawnBlackHole(time) {
+    const target = findNearestEnemy();
+    const x = target
+      ? target.x + Phaser.Math.FloatBetween(-60, 60)
+      : player.x + Phaser.Math.FloatBetween(-200, 200);
+    const y = target
+      ? target.y + Phaser.Math.FloatBetween(-60, 60)
+      : player.y + Phaser.Math.FloatBetween(-200, 200);
+
+    const pullRadius = this.level >= 2 ? 280 : 200;
+    const duration = 2000;
+    const damage = getWeaponDamage(this.type, this.level);
+
+    // 시각 — 외곽 링
+    const outerRing = this.scene.add.circle(x, y, pullRadius, 0x220033, 0)
+      .setStrokeStyle(2, 0xaa44ff, 0.35).setDepth(45);
+    const core = this.scene.add.circle(x, y, 18, 0x000000, 1)
+      .setStrokeStyle(4, 0xcc66ff, 0.9).setDepth(47);
+    const glow = this.scene.add.circle(x, y, 38, 0x6600cc, 0.22).setDepth(46);
+
+    // 회전 링 애니
+    this.scene.tweens.add({
+      targets: outerRing,
+      scale: { from: 0.4, to: 1 },
+      alpha: { from: 0, to: 1 },
+      duration: 300,
+      ease: "Back.easeOut",
+    });
+
+    this.scene.tweens.add({
+      targets: core,
+      scale: { from: 0.2, to: 1 },
+      duration: 300,
+      ease: "Back.easeOut",
+    });
+
+    // 흡입 틱
+    const pullInterval = this.scene.time.addEvent({
+      delay: 80,
+      loop: true,
+      callback: () => {
+        enemies.getChildren().forEach((enemy) => {
+          if (!enemy.active) return;
+          const dist = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
+          if (dist > pullRadius) return;
+
+          // 끌어당기기
+          const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, x, y);
+          const pullStrength = this.level >= 4 ? 180 : 120;
+          enemy.body.setVelocity(
+            Math.cos(angle) * pullStrength,
+            Math.sin(angle) * pullStrength
+          );
+
+          // 슬로우 (Lv4+)
+          if (this.level >= 4) {
+            enemy.stunnedUntil = Math.max(
+              enemy.stunnedUntil || 0,
+              this.scene.time.now + 120
+            );
+          }
+
+          // 파티클 흡입 이펙트
+          if (Math.random() < 0.3) {
+            const px = enemy.x;
+            const py = enemy.y;
+            const particle = this.scene.add.circle(px, py, 3, 0xcc66ff, 0.7).setDepth(46);
+            this.scene.tweens.add({
+              targets: particle,
+              x,
+              y,
+              alpha: 0,
+              scale: 0.1,
+              duration: 300,
+              ease: "Cubic.easeIn",
+              onComplete: () => particle.destroy(),
+            });
+          }
+        });
+      },
+    });
+
+    // duration 후 폭발
+    this.scene.time.delayedCall(duration, () => {
+      pullInterval.destroy();
+
+      const explodeRadius = this.level >= 2 ? 220 : 160;
+      explode.call(this.scene, x, y, explodeRadius, damage);
+
+      // 폭발 스턴 (Lv4+)
+      if (this.level >= 4) {
+        findEnemiesInRange(x, y, explodeRadius).forEach((enemy) => {
+          enemy.stunnedUntil = this.scene.time.now + 800;
+          enemy.setFillStyle(0x99ddff);
+        });
+      }
+
+      // 미니 블랙홀 (Lv5)
+      if (this.level >= 5) {
+        for (let i = 0; i < 3; i++) {
+          const angle = (i / 3) * Math.PI * 2;
+          const mx = x + Math.cos(angle) * 120;
+          const my = y + Math.sin(angle) * 120;
+          this.scene.time.delayedCall(i * 180, () => {
+            this.spawnMiniBlackHole(mx, my, damage * 0.45);
+          });
+        }
+      }
+
+      outerRing.destroy();
+      core.destroy();
+      glow.destroy();
+    });
+
+    // 코어 펄스 트윈
+    this.scene.tweens.add({
+      targets: glow,
+      scale: { from: 1, to: 1.4 },
+      alpha: { from: 0.22, to: 0.1 },
+      duration: 500,
+      yoyo: true,
+      repeat: Math.floor(duration / 1000),
+    });
+  }
+
+  spawnMiniBlackHole(x, y, damage) {
+    const radius = 110;
+    const miniCore = this.scene.add.circle(x, y, 10, 0x000000, 1)
+      .setStrokeStyle(3, 0xcc66ff, 0.8).setDepth(47);
+    const miniGlow = this.scene.add.circle(x, y, 22, 0x6600cc, 0.2).setDepth(46);
+
+    const pullInterval = this.scene.time.addEvent({
+      delay: 80,
+      loop: true,
+      callback: () => {
+        enemies.getChildren().forEach((enemy) => {
+          if (!enemy.active) return;
+          const dist = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
+          if (dist > radius) return;
+          const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, x, y);
+          enemy.body.setVelocity(Math.cos(angle) * 130, Math.sin(angle) * 130);
+        });
+      },
+    });
+
+    this.scene.time.delayedCall(1000, () => {
+      pullInterval.destroy();
+      explode.call(this.scene, x, y, radius, damage);
+      miniCore.destroy();
+      miniGlow.destroy();
+    });
+
+    this.scene.tweens.add({
+      targets: [miniCore, miniGlow],
+      alpha: 0,
+      duration: 1000,
+      delay: 600,
+      onComplete: () => { miniCore.destroy(); miniGlow.destroy(); },
+    });
+  }
+}
+
+// ─── 부메랑 ───────────────────────────────────────────────
+
+class BoomerangWeapon extends AutoWeapon {
+  constructor(scene) {
+    super(scene, "boomerang", 1800);
+  }
+
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+
+    const count = this.level >= 2 ? 2 : 1;
+    const trips = this.level >= 3 ? 2 : 1;
+
+    for (let i = 0; i < count; i++) {
+      this.scene.time.delayedCall(i * 180, () => {
+        this.throwBoomerang(trips, i);
+      });
+    }
+
+    // 선회 부메랑 (Lv5)
+    if (this.level >= 5) {
+      [-1, 1].forEach((dir, idx) => {
+        this.scene.time.delayedCall(idx * 120, () => {
+          this.throwOrbitBoomerang(dir);
+        });
+      });
+    }
+  }
+
+  throwBoomerang(trips, offset = 0) {
+    const target = findNearestEnemy();
+    if (!target) return;
+
+    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y)
+      + (offset === 1 ? 0.18 : offset === 0 ? -0.09 : 0);
+
+    const size = this.level >= 4 ? 14 : 10;
+    const damage = getWeaponDamage(this.type, this.level);
+    const speed = 520;
+    const maxDist = 500;
+
+    this.launchBoomerang(player.x, player.y, angle, size, damage, speed, maxDist, trips);
+  }
+
+  launchBoomerang(startX, startY, angle, size, damage, speed, maxDist, tripsLeft) {
+    const color = 0x88ffdd;
+    const boomBody = this.scene.add.rectangle(startX, startY, size * 3, size * 0.7, color, 0.92)
+      .setDepth(32);
+    this.scene.physics.add.existing(boomBody);
+    boomBody.body.setSize(size * 3, size * 0.7);
+    boomBody.damage = damage;
+    boomBody.trailColor = color;
+    boomBody.trailSize = size * 0.5;
+    bullets.add(boomBody);
+
+    const vx = Math.cos(angle) * speed;
+    const vy = Math.sin(angle) * speed;
+    boomBody.body.setVelocity(vx, vy);
+
+    let returning = false;
+    let hitEnemies = new Set();
+    let distTraveled = 0;
+    let lastX = startX;
+    let lastY = startY;
+
+    const spinTween = this.scene.tweens.add({
+      targets: boomBody,
+      rotation: { from: 0, to: Math.PI * 2 },
+      duration: 400,
+      repeat: -1,
+    });
+
+    const updateTimer = this.scene.time.addEvent({
+      delay: 16,
+      loop: true,
+      callback: () => {
+        if (!boomBody.active) { updateTimer.destroy(); spinTween.stop(); return; }
+
+        // 이동 거리 추적
+        distTraveled += Phaser.Math.Distance.Between(lastX, lastY, boomBody.x, boomBody.y);
+        lastX = boomBody.x;
+        lastY = boomBody.y;
+
+        // 적 피해 판정
+        enemies.getChildren().forEach((enemy) => {
+          if (!enemy.active || hitEnemies.has(enemy)) return;
+          const dist = Phaser.Math.Distance.Between(boomBody.x, boomBody.y, enemy.x, enemy.y);
+          if (dist < size * 1.8) {
+            hitEnemies.add(enemy);
+            damageEnemy.call(this.scene, enemy, damage);
+            // 복귀 시 히트셋 리셋
+            if (returning) hitEnemies.clear();
+          }
+        });
+
+        // 반환 트리거
+        if (!returning && distTraveled >= maxDist) {
+          returning = true;
+          hitEnemies.clear();
+        }
+
+        if (returning) {
+          const retAngle = Phaser.Math.Angle.Between(boomBody.x, boomBody.y, player.x, player.y);
+          boomBody.body.setVelocity(
+            Math.cos(retAngle) * speed * 1.1,
+            Math.sin(retAngle) * speed * 1.1
+          );
+
+          // 플레이어에 도달하면 제거 or 재발사
+          const distToPlayer = Phaser.Math.Distance.Between(boomBody.x, boomBody.y, player.x, player.y);
+          if (distToPlayer < 30) {
+            updateTimer.destroy();
+            spinTween.stop();
+            boomBody.destroy();
+
+            if (tripsLeft > 1) {
+              const newAngle = Phaser.Math.Angle.Between(player.x, player.y,
+                findNearestEnemy()?.x ?? player.x + 1, findNearestEnemy()?.y ?? player.y);
+              this.launchBoomerang(player.x, player.y, newAngle, size, damage, speed, maxDist, tripsLeft - 1);
+            }
+          }
+        }
+      },
+    });
+  }
+
+  throwOrbitBoomerang(dir) {
+    let orbitAngle = dir > 0 ? 0 : Math.PI;
+    const orbitRadius = 110;
+    const damage = getWeaponDamage(this.type, this.level) * 0.5;
+    const duration = 2200;
+    let elapsed = 0;
+    const hitCooldown = new Map();
+
+    const orb = this.scene.add.rectangle(
+      player.x + Math.cos(orbitAngle) * orbitRadius,
+      player.y + Math.sin(orbitAngle) * orbitRadius,
+      28, 8, 0x44ffcc, 0.88
+    ).setDepth(31);
+
+    const timer = this.scene.time.addEvent({
+      delay: 16,
+      loop: true,
+      callback: () => {
+        elapsed += 16;
+        orbitAngle += dir * 0.09;
+
+        const ox = player.x + Math.cos(orbitAngle) * orbitRadius;
+        const oy = player.y + Math.sin(orbitAngle) * orbitRadius;
+        orb.setPosition(ox, oy).setRotation(orbitAngle);
+
+        // 트레일
+        const trail = this.scene.add.circle(ox, oy, 4, 0x44ffcc, 0.3).setDepth(30);
+        this.scene.tweens.add({
+          targets: trail,
+          alpha: 0,
+          scale: 0.1,
+          duration: 180,
+          onComplete: () => trail.destroy(),
+        });
+
+        // 피해 판정
+        enemies.getChildren().forEach((enemy) => {
+          if (!enemy.active) return;
+          const dist = Phaser.Math.Distance.Between(ox, oy, enemy.x, enemy.y);
+          if (dist < 30) {
+            const last = hitCooldown.get(enemy) || 0;
+            if (this.scene.time.now > last + 400) {
+              hitCooldown.set(enemy, this.scene.time.now);
+              damageEnemy.call(this.scene, enemy, damage);
+            }
+          }
+        });
+
+        if (elapsed >= duration) {
+          timer.destroy();
+          orb.destroy();
+        }
+      },
+    });
+  }
+}
+
+// ─── 체인 ─────────────────────────────────────────────────
+
+class ChainWeapon extends AutoWeapon {
+  constructor(scene) {
+    super(scene, "chain", 2200);
+    this.activeChains = [];
+  }
+
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+
+    this.clearChains();
+
+    const maxLinks = this.level >= 5 ? 5 : this.level >= 2 ? 3 : 2;
+    const targets = findEnemiesInRange(player.x, player.y, 700, maxLinks);
+    if (targets.length < 1) return;
+
+    const damage = getWeaponDamage(this.type, this.level);
+    const duration = 1800;
+
+    // 플레이어→첫 적 연결
+    const chainObjs = [];
+    const allTargets = [{ x: player.x, y: player.y }, ...targets];
+
+    for (let i = 0; i < allTargets.length - 1; i++) {
+      const from = allTargets[i];
+      const to = allTargets[i + 1];
+      const line = this.drawChainLine(from, to);
+      chainObjs.push(line);
+    }
+
+    this.activeChains.push(...chainObjs);
+
+    // 틱 피해 + 시각 업데이트
+    let elapsed = 0;
+    const tickInterval = 300;
+    const hitCooldown = new Map();
+
+    const updateTimer = this.scene.time.addEvent({
+      delay: 16,
+      loop: true,
+      callback: () => {
+        elapsed += 16;
+
+        // 선 위치 갱신
+        chainObjs.forEach((obj, i) => {
+          if (!obj.active) return;
+          const from = i === 0 ? player : targets[i - 1];
+          const to = targets[i];
+          if (!from || !to || !to.active) { obj.destroy(); return; }
+          this.updateChainLine(obj, from, to);
+        });
+
+        // 연결 피해 틱
+        targets.forEach((enemy) => {
+          if (!enemy.active) return;
+          const last = hitCooldown.get(enemy) || 0;
+          if (this.scene.time.now > last + tickInterval) {
+            hitCooldown.set(enemy, this.scene.time.now);
+            damageEnemy.call(this.scene, enemy, damage * 0.35);
+
+            // Lv3 피해 공유
+            if (this.level >= 3) {
+              targets.forEach((other) => {
+                if (other !== enemy && other.active) {
+                  damageEnemy.call(this.scene, other, damage * 0.15);
+                }
+              });
+            }
+          }
+        });
+
+        // Lv4 끌어당기기
+        if (this.level >= 4) {
+          targets.forEach((enemy) => {
+            if (!enemy.active) return;
+            const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
+            enemy.body.setVelocity(
+              enemy.body.velocity.x + Math.cos(angle) * 30,
+              enemy.body.velocity.y + Math.sin(angle) * 30
+            );
+          });
+        }
+
+        if (elapsed >= duration) {
+          updateTimer.destroy();
+          chainObjs.forEach((obj) => { if (obj.active) obj.destroy(); });
+
+          // Lv5 사슬 폭발
+          if (this.level >= 5) {
+            targets.forEach((enemy) => {
+              if (!enemy.active) return;
+              explode.call(this.scene, enemy.x, enemy.y, 90, damage * 0.6);
+            });
+          }
+        }
+      },
+    });
+  }
+
+  drawChainLine(from, to) {
+    const line = this.scene.add.graphics().setDepth(48);
+    this.updateChainLine(line, from, to);
+    return line;
+  }
+
+  updateChainLine(graphics, from, to) {
+    graphics.clear();
+    // 글로우
+    graphics.lineStyle(10, 0x4488ff, 0.12);
+    graphics.beginPath();
+    graphics.moveTo(from.x, from.y);
+    graphics.lineTo(to.x ?? to.x, to.y ?? to.y);
+    graphics.strokePath();
+    // 코어
+    graphics.lineStyle(2.5, 0x88bbff, 0.85);
+    graphics.beginPath();
+    graphics.moveTo(from.x, from.y);
+    graphics.lineTo(to.x, to.y);
+    graphics.strokePath();
+    // 세그먼트 노드
+    const segments = 5;
+    for (let i = 1; i < segments; i++) {
+      const t = i / segments;
+      const nx = from.x + (to.x - from.x) * t;
+      const ny = from.y + (to.y - from.y) * t;
+      graphics.fillStyle(0xaaccff, 0.6);
+      graphics.fillCircle(nx, ny, 3);
+    }
+  }
+
+  clearChains() {
+    this.activeChains.forEach((obj) => { if (obj?.active) obj.destroy(); });
+    this.activeChains = [];
   }
 }
