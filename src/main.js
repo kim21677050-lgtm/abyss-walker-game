@@ -319,7 +319,7 @@ gameStartTime = this.time.now;
        if (devMode) return;
       level++;
       exp = 0;
-      expToNextLevel += Math.floor(expToNextLevel * 0.3 + 3);
+      expToNextLevel += Math.floor(expToNextLevel * 0.2 + 0.2);
       showLevelUpText.call(this);
       showWeaponSelection.call(this);
     }
