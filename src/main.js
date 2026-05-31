@@ -83,6 +83,15 @@ let enemyMaxHp = 3;
 let enemySpawnBonus = 0;
 let enemySpawnRemainder = 0;
 let joystick = null;
+let playerHp = 100;
+let playerMaxHp = 100;
+let healthBarBg;
+let healthBarGreen;
+let healthBarRed;
+let isDead = false;
+let lastDamageTime = 0;
+const CONTACT_DAMAGE_PER_SEC = 34; // 약 3초 버티면 죽음
+let gameStartTime = 0;
 
 const playerVelocity = {
   x: 0,
@@ -103,6 +112,8 @@ function create() {
   this.physics.add.existing(player);
   player.body.setDrag(800);
   player.body.setMaxVelocity(400);
+playerHp = playerMaxHp;
+gameStartTime = this.time.now;
 
   enemies = this.physics.add.group();
   bullets = this.physics.add.group();
@@ -159,6 +170,38 @@ function create() {
     color: "#ffffff",
     align: "right",
   }).setOrigin(1, 0).setScrollFactor(0).setDepth(1000);
+healthBarBg = this.add.rectangle(
+  this.scale.width - 210,
+  72,
+  180,
+  10,
+  0x441111
+)
+.setOrigin(0, 0)
+.setScrollFactor(0)
+.setDepth(1000);
+
+healthBarRed = this.add.rectangle(
+  this.scale.width - 210,
+  72,
+  180,
+  10,
+  0xaa2222
+)
+.setOrigin(0, 0)
+.setScrollFactor(0)
+.setDepth(1001);
+
+healthBarGreen = this.add.rectangle(
+  this.scale.width - 210,
+  72,
+  180,
+  10,
+  0x00ff66
+)
+.setOrigin(0, 0)
+.setScrollFactor(0)
+.setDepth(1002);
 
   weaponText = this.add.text(20, 52, "", {
     fontSize: "16px",
@@ -207,6 +250,8 @@ function update(time, delta) {
   });
 
   weaponManager.tick(time, delta);
+  applyContactDamage.call(this, delta);
+updateHealthBar();
   updateProjectiles.call(this, time, delta);
   pullExpOrbs.call(this);
 
@@ -536,6 +581,10 @@ function layoutHud(scene, width = scene.scale.width, height = scene.scale.height
   expInfoText.setWordWrapWidth(Math.floor(safeWidth * 0.35));
 
   scene.cameras.main.setViewport(0, 0, width, height);
+
+  healthBarBg.setPosition(width - 210, 72);
+healthBarGreen.setPosition(width - 210, 72);
+healthBarRed.setPosition(width - 210, 72);
 }
 
 function updateCameraZoom(width) {
@@ -1290,4 +1339,153 @@ function createWeapon(scene, type) {
     case "laser": return new LaserWeapon(scene);
     default: throw new Error(`Unknown weapon type: ${type}`);
   }
+}
+
+function applyContactDamage(delta) {
+  if (isDead) return;
+
+  let touchingEnemy = false;
+
+  enemies.getChildren().forEach((enemy) => {
+    if (!enemy.active) return;
+
+    const dist = Phaser.Math.Distance.Between(
+      player.x,
+      player.y,
+      enemy.x,
+      enemy.y
+    );
+
+    if (dist < 38) {
+      touchingEnemy = true;
+    }
+  });
+
+  if (!touchingEnemy) return;
+
+  const damage =
+    CONTACT_DAMAGE_PER_SEC * (delta / 1000);
+
+  playerHp -= damage;
+
+  player.setFillStyle(0xff8888);
+
+  if (this.time.now > lastDamageTime + 80) {
+    lastDamageTime = this.time.now;
+
+    this.tweens.add({
+      targets: player,
+      alpha: 0.55,
+      duration: 60,
+      yoyo: true,
+    });
+  }
+
+  if (playerHp <= 0) {
+    playerHp = 0;
+    killPlayer.call(this);
+  }
+}
+
+function updateHealthBar() {
+  const ratio = Phaser.Math.Clamp(
+    playerHp / playerMaxHp,
+    0,
+    1
+  );
+
+  const width = 180 * ratio;
+
+  healthBarGreen.width = width;
+  healthBarRed.width = 180 - width;
+  healthBarRed.x =
+    healthBarBg.x + width;
+}
+
+function killPlayer() {
+  if (isDead) return;
+  isDead = true;
+
+  this.physics.pause();
+
+  const deathTexts = [
+    "YOU DIED",
+    "MISSION FAILED",
+    "ERASED",
+    "THE NIGHT CONSUMED YOU",
+  ];
+
+  const chosen =
+    Phaser.Utils.Array.GetRandom(
+      deathTexts
+    );
+
+  const surviveTime = Math.floor(
+    (this.time.now - gameStartTime) /
+      1000
+  );
+
+  const overlay = this.add
+    .rectangle(
+      0,
+      0,
+      this.scale.width,
+      this.scale.height,
+      0x000000,
+      0.75
+    )
+    .setOrigin(0)
+    .setScrollFactor(0)
+    .setDepth(5000);
+
+  this.add
+    .text(
+      this.scale.width / 2,
+      this.scale.height / 2 - 50,
+      chosen,
+      {
+        fontSize: "52px",
+        color: "#ff4444",
+        fontStyle: "bold",
+      }
+    )
+    .setOrigin(0.5)
+    .setScrollFactor(0)
+    .setDepth(5001);
+
+  this.add
+    .text(
+      this.scale.width / 2,
+      this.scale.height / 2 + 10,
+      `생존 시간 ${surviveTime}초`,
+      {
+        fontSize: "24px",
+        color: "#ffffff",
+      }
+    )
+    .setOrigin(0.5)
+    .setScrollFactor(0)
+    .setDepth(5001);
+
+  this.add
+    .text(
+      this.scale.width / 2,
+      this.scale.height / 2 + 70,
+      "R 키로 재시작",
+      {
+        fontSize: "20px",
+        color: "#bbbbbb",
+      }
+    )
+    .setOrigin(0.5)
+    .setScrollFactor(0)
+    .setDepth(5001);
+
+  this.input.keyboard.once(
+    "keydown-R",
+    () => {
+      this.scene.restart();
+      isDead = false;
+    }
+  );
 }
