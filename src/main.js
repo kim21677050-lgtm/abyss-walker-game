@@ -228,7 +228,7 @@ gameStartTime = this.time.now;
        if (devMode) return;
       level++;
       exp = 0;
-      expToNextLevel += Math.floor(expToNextLevel * 0.4 + 4);
+      expToNextLevel += Math.floor(expToNextLevel * 0.3 + 3);
       showLevelUpText.call(this);
       showWeaponSelection.call(this);
     }
@@ -462,7 +462,7 @@ function pullExpOrbs() {
   expOrbs.getChildren().forEach((orb) => {
     const distance = Phaser.Math.Distance.Between(player.x, player.y, orb.x, orb.y);
 
-    if (distance < 150) {
+    if (distance < 225) {
       this.physics.moveToObject(orb, player, 520);
     }
   });
