@@ -214,6 +214,7 @@ let enemySpawnGrowthTimer;
 let isChoosingWeapon = false;
 let enemyMaxHp = 3;
 let enemySpawnBonus = 0;
+let elapsedSeconds = 0; // 경과 시간 추적
 let enemySpawnRemainder = 0;
 let joystick = null;
 let playerHp = 100;
@@ -296,11 +297,11 @@ gameStartTime = this.time.now;
     spawnEnemy.call(this);
   }
 
-  spawnTimer = this.time.addEvent({
-    delay: 400,
-    callback: () => spawnEnemyWave.call(this),
-    loop: true,
-  });
+spawnTimer = this.time.addEvent({
+  delay: 250, // 더 자주 웨이브 호출
+  callback: () => spawnEnemyWave.call(this),
+  loop: true,
+});
 
   enemyHealthTimer = this.time.addEvent({
     delay: 45000,
@@ -308,11 +309,11 @@ gameStartTime = this.time.now;
     loop: true,
   });
 
-  enemySpawnGrowthTimer = this.time.addEvent({
-    delay: 60000,
-    callback: () => increaseEnemySpawnAmount.call(this),
-    loop: true,
-  });
+enemySpawnGrowthTimer = this.time.addEvent({
+  delay: 10000,
+  callback: () => increaseEnemySpawnAmount.call(this),
+  loop: true,
+});
 
   this.physics.add.overlap(bullets, enemies, handleBulletHit, null, this);
 
@@ -829,7 +830,26 @@ function increaseEnemyMaxHp() {
 }
 
 function increaseEnemySpawnAmount() {
-  enemySpawnBonus += 0.15;
+  elapsedSeconds += 10;
+
+  // 경과 시간에 따라 증가폭이 점점 커짐
+  const growthRate = 0.12 + elapsedSeconds * 0.004;
+  enemySpawnBonus += growthRate;
+
+  // 스폰 딜레이도 시간이 지날수록 단축 (최소 120ms)
+  const newDelay = Math.max(120, 250 - elapsedSeconds * 1.2);
+  spawnTimer.delay = newDelay;
+
+  // 1분마다 대규모 웨이브 추가
+  if (elapsedSeconds % 60 === 0) {
+    showWarningText.call(gameSceneRef);
+    gameSceneRef.time.delayedCall(2000, () => {
+      const waveCount = 20 + Math.floor(elapsedSeconds / 60) * 10;
+      for (let i = 0; i < waveCount; i++) {
+        spawnEnemy.call(gameSceneRef);
+      }
+    });
+  }
 }
 
 // ─── 전투 ────────────────────────────────────────────────
@@ -4126,4 +4146,41 @@ function mulberry32(seed) {
     t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   };
+}
+
+function showWarningText() {
+  const cx = this.scale.width / 2;
+  const cy = this.scale.height / 2;
+
+  const warn = this.add.text(cx, cy, "⚠ 대규모 침공!", {
+    fontSize: "38px",
+    color: "#ff4444",
+    fontStyle: "bold",
+    shadow: { blur: 16, color: "#ff0000", fill: true },
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(4000);
+
+  const sub = this.add.text(cx, cy + 52, "적의 수가 급증합니다", {
+    fontSize: "18px",
+    color: "#ffaaaa",
+    letterSpacing: 3,
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(4000);
+
+  this.tweens.add({
+    targets: warn,
+    alpha: { from: 1, to: 0 },
+    scale: { from: 1, to: 1.15 },
+    y: cy - 30,
+    duration: 1800,
+    delay: 800,
+    ease: "Cubic.easeIn",
+    onComplete: () => warn.destroy(),
+  });
+
+  this.tweens.add({
+    targets: sub,
+    alpha: { from: 1, to: 0 },
+    duration: 1500,
+    delay: 1000,
+    onComplete: () => sub.destroy(),
+  });
 }
