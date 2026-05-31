@@ -67,6 +67,7 @@ let exp = 0;
 let level = 1;
 let expToNextLevel = 5;
 let levelText;
+let expInfoText;
 let weaponText;
 let levelUpText = null;
 let weaponManager;
@@ -108,7 +109,7 @@ function create() {
   });
 
   enemyHealthTimer = this.time.addEvent({
-    delay: 30000,
+    delay: 45000,
     callback: () => increaseEnemyMaxHp.call(this),
     loop: true,
   });
@@ -136,6 +137,12 @@ function create() {
     color: "#ffffff",
   }).setScrollFactor(0).setDepth(1000);
 
+  expInfoText = this.add.text(this.scale.width - 20, 20, "", {
+    fontSize: "15px",
+    color: "#ffffff",
+    align: "right",
+  }).setOrigin(1, 0).setScrollFactor(0).setDepth(1000);
+
   weaponText = this.add.text(20, 52, "", {
     fontSize: "16px",
     color: "#b7f7ff",
@@ -150,6 +157,7 @@ function create() {
 
   weaponManager.addOrUpgrade("machineGun");
   updateWeaponHud();
+  updateExpHud();
 }
 
 function update(time, delta) {
@@ -165,7 +173,7 @@ function update(time, delta) {
       return;
     }
 
-    this.physics.moveToObject(enemy, player, 180);
+    this.physics.moveToObject(enemy, player, 150);
   });
 
   weaponManager.tick(time, delta);
@@ -173,6 +181,7 @@ function update(time, delta) {
   pullExpOrbs.call(this);
 
   levelText.setText(`Lv. ${level}`);
+  updateExpHud();
 }
 
 function movePlayer() {
@@ -286,6 +295,7 @@ function showWeaponSelection() {
 
 function createWeaponCard(x, y, number, weaponType, nextLevel) {
   const card = this.add.container(x, y);
+  const nextDamage = getWeaponDamage(weaponType.id, nextLevel);
   const bg = this.add.rectangle(0, 0, 200, 260, 0x151a24, 0.96)
     .setStrokeStyle(2, weaponType.color)
     .setName("bg");
@@ -309,14 +319,19 @@ function createWeaponCard(x, y, number, weaponType, nextLevel) {
     fontSize: "18px",
     color: "#b7f7ff",
   }).setOrigin(0.5);
-  const desc = this.add.text(0, 66, weaponType.desc[nextLevel - 1], {
+  const damageLabel = this.add.text(0, 52, `DMG ${formatDamage(nextDamage)} / hit`, {
+    fontSize: "15px",
+    color: "#fff0a6",
+    fontStyle: "bold",
+  }).setOrigin(0.5);
+  const desc = this.add.text(0, 88, weaponType.desc[nextLevel - 1], {
     fontSize: "15px",
     color: "#d8deea",
     align: "center",
     wordWrap: { width: 160 },
   }).setOrigin(0.5);
 
-  card.add([bg, key, icon, name, levelLabel, desc]);
+  card.add([bg, key, icon, name, levelLabel, damageLabel, desc]);
   return card;
 }
 
@@ -335,6 +350,26 @@ function updateWeaponHud() {
       .map((weapon) => `${weapon.definition.name} Lv.${weapon.level}`)
       .join(" / ")
   );
+}
+
+function updateExpHud() {
+  expInfoText.setText(`Lv. ${level}\nEXP ${exp}/${expToNextLevel}`);
+}
+
+function formatDamage(value) {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+}
+
+function getWeaponDamage(type, level) {
+  const damageTable = {
+    machineGun: [0.7, 0.9, 1.1, 1.3, 1.6],
+    magicMissile: [2.2, 2.7, 3.2, 3.8, 4.5],
+    lightning: [2.5, 3.1, 3.7, 4.4, 5.2],
+    sword: [1.6, 2.1, 2.6, 3.1, 3.8],
+    laser: [2.4, 3.0, 3.6, 4.3, 5.0],
+  };
+
+  return damageTable[type][Math.min(level, 5) - 1];
 }
 
 function spawnEnemy() {
@@ -766,7 +801,7 @@ function splitMissile(x, y) {
 
   targets.forEach((target) => {
     const bullet = createProjectile(this, x, y, 0xd6a6ff, 5);
-    bullet.damage = 1;
+    bullet.damage = getWeaponDamage("magicMissile", 5) * 0.45;
     bullet.homing = true;
     bullet.target = target;
     bullet.speed = 520;
@@ -848,9 +883,9 @@ class MachineGunWeapon extends AutoWeapon {
         const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
         const shotColor = this.level >= 3 && this.shotCount % 8 === 0 ? 0x99ff66 : 0xffff66;
         const bullet = createTracerProjectile(this.scene, player.x + i * 10 - 5, player.y, angle, shotColor);
-        bullet.damage = 1;
+        bullet.damage = getWeaponDamage(this.type, this.level);
         bullet.explodeRadius = this.level >= 4 ? 55 : 0;
-        bullet.explodeDamage = 1;
+        bullet.explodeDamage = getWeaponDamage(this.type, this.level) * 0.6;
         bullet.trailColor = shotColor;
         bullet.trailSize = 4;
 
@@ -874,7 +909,7 @@ class MachineGunWeapon extends AutoWeapon {
 
         const angle = Phaser.Math.Angle.Between(player.x + offset, player.y - 30, target.x, target.y);
         const bullet = createTracerProjectile(this.scene, player.x + offset, player.y - 30, angle, 0x99ff66);
-        bullet.damage = 1;
+        bullet.damage = getWeaponDamage(this.type, this.level) * 0.75;
         bullet.trailColor = 0x99ff66;
         showMuzzleFlash(this.scene, player.x + offset, player.y - 30, angle, 0x99ff66);
         this.scene.physics.moveToObject(bullet, target, 580);
@@ -900,13 +935,13 @@ class MagicMissileWeapon extends AutoWeapon {
 
       const bullet = createProjectile(this.scene, player.x, player.y, 0xbb88ff, 7);
       const aura = this.scene.add.circle(player.x, player.y, 18, 0xbb88ff, 0.22).setDepth(32);
-      bullet.damage = 1.5;
+      bullet.damage = getWeaponDamage(this.type, this.level);
       bullet.homing = true;
       bullet.target = target;
       bullet.speed = 480;
       bullet.pierce = this.level >= 3 ? 1 : 0;
       bullet.explodeRadius = this.level >= 4 ? 70 : 0;
-      bullet.explodeDamage = 1;
+      bullet.explodeDamage = getWeaponDamage(this.type, this.level) * 0.5;
       bullet.splitOnHit = this.level >= 5;
       bullet.trailColor = 0xd6a6ff;
       bullet.trailSize = 8;
@@ -937,17 +972,17 @@ class LightningWeapon extends AutoWeapon {
       if (this.level >= 3 && targets[0]) {
         const chained = findEnemiesInRange(targets[0].x, targets[0].y, 280, 2)
           .filter((enemy) => !targets.includes(enemy));
-        chained.forEach((target) => this.strike(target, time, 0.8));
+        chained.forEach((target) => this.strike(target, time, getWeaponDamage(this.type, this.level) * 0.55));
       }
     }
 
     if (this.level >= 5 && time > this.lastStorm + 2500) {
       this.lastStorm = time;
-      findEnemiesInRange(player.x, player.y, 900, 5).forEach((target) => this.strike(target, time, 1.2));
+      findEnemiesInRange(player.x, player.y, 900, 5).forEach((target) => this.strike(target, time, getWeaponDamage(this.type, this.level) * 0.75));
     }
   }
 
-  strike(target, time, damage = 1.5) {
+  strike(target, time, damage = getWeaponDamage("lightning", this.level)) {
     showLightningStrike(this.scene, target.x, target.y, this.level >= 5);
 
     if (this.level >= 4) {
@@ -998,7 +1033,7 @@ class SwordWeapon extends AutoWeapon {
       if (time > this.lastSpinDamage + 250) {
         this.lastSpinDamage = time;
         findEnemiesInRange(player.x, player.y, radius + 35, 4).forEach((enemy) => {
-          damageEnemy.call(this.scene, enemy, 1);
+          damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level) * 0.45);
         });
       }
     }
@@ -1031,7 +1066,7 @@ class SwordWeapon extends AutoWeapon {
     });
 
     findEnemiesInRange(player.x, player.y, range, 8).forEach((enemy) => {
-      damageEnemy.call(this.scene, enemy, 1.5);
+      damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level));
     });
   }
 
@@ -1042,7 +1077,7 @@ class SwordWeapon extends AutoWeapon {
     const wave = createProjectile(this.scene, player.x, player.y, 0xffd1dc, 8);
     wave.setScale(1.6, 0.55);
     wave.setRotation(Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y));
-    wave.damage = 1.25;
+    wave.damage = getWeaponDamage(this.type, this.level) * 0.8;
     wave.trailColor = 0xffd1dc;
     wave.trailSize = 10;
     this.scene.physics.moveToObject(wave, target, 520);
@@ -1070,11 +1105,11 @@ class LaserWeapon extends AutoWeapon {
     if (this.level >= 5 && time > this.lastSpin + 180) {
       this.lastSpin = time;
       this.spinAngle += delta * 0.006 + 0.22;
-      this.fireLaser(this.spinAngle, 700, true, 0.65);
+      this.fireLaser(this.spinAngle, 700, true, getWeaponDamage(this.type, this.level) * 0.35);
     }
   }
 
-  fireLaser(angle, length, burn = false, damage = 1.2) {
+  fireLaser(angle, length, burn = false, damage = getWeaponDamage("laser", this.level)) {
     const endX = player.x + Math.cos(angle) * length;
     const endY = player.y + Math.sin(angle) * length;
     showLaserBeam(this.scene, player.x, player.y, endX, endY, burn);
