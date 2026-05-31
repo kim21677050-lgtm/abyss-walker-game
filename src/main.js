@@ -259,12 +259,14 @@ function showWeaponSelection() {
     const owned = weaponManager.getWeapon(weaponType.id);
     const nextLevel = owned ? Math.min(owned.level + 1, 5) : 1;
     const card = createWeaponCard.call(this, x, y, index + 1, weaponType, nextLevel);
+    const hitZone = this.add.zone(x, y, 200, 260)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
 
-    card.setInteractive(new Phaser.Geom.Rectangle(-100, -130, 200, 260), Phaser.Geom.Rectangle.Contains);
-    card.on("pointerdown", () => selectOption(weaponType));
-    card.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
-    card.on("pointerout", () => card.getByName("bg").setStrokeStyle(2, weaponType.color));
-    overlay.add(card);
+    hitZone.on("pointerdown", () => selectOption(weaponType));
+    hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
+    hitZone.on("pointerout", () => card.getByName("bg").setStrokeStyle(2, weaponType.color));
+    overlay.add([card, hitZone]);
   });
 
   this.input.keyboard.on("keydown-ONE", keyHandlers[0]);
