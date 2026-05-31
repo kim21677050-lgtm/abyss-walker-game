@@ -36,6 +36,27 @@ const WEAPON_TYPES = [
     color: 0xff5533,
     desc: ["\uC9C1\uC120 \uB808\uC774\uC800", "\uAE38\uC774 \uC99D\uAC00", "2\uAC08\uB798", "\uD654\uC0C1", "\uD68C\uC804 \uB808\uC774\uC800"],
   },
+  {
+    id: "skull",
+    name: "해골",
+    icon: "SK",
+    color: 0xcc99ff,
+    desc: ["광역 스턴+독", "독 지속 증가", "반경 확대", "스턴 시간 증가", "중독 중첩"],
+  },
+  {
+    id: "lung",
+    name: "유지호의 폐",
+    icon: "LG",
+    color: 0xff8844,
+    desc: ["3회 연속 폭발", "폭발 범위 증가", "5회 연속 폭발", "폭발 피해 증가", "화염 지속 피해"],
+  },
+  {
+    id: "scythe",
+    name: "대낫",
+    icon: "SC",
+    color: 0x88ffcc,
+    desc: ["전방 휩쓸기", "범위 확대", "2회 연속 베기", "관통 낫날", "회오리 소환"],
+  },
 ];
 
 const config = {
@@ -596,6 +617,9 @@ function getWeaponDamage(type, level) {
     lightning: [2.5, 3.1, 3.7, 4.4, 5.2],
     sword: [1.6, 2.1, 2.6, 3.1, 3.8],
     laser: [2.4, 3.0, 3.6, 4.3, 5.0],
+    skull:  [3.0, 3.8, 4.6, 5.5, 6.5],
+    lung:   [2.8, 3.5, 4.2, 5.2, 6.2],
+    scythe: [4.0, 5.0, 6.0, 7.2, 8.5],
   };
 
   return damageTable[type][Math.min(level, 5) - 1];
@@ -757,6 +781,11 @@ function updateProjectiles(time) {
     if (enemy.burnUntil > time && (!enemy.nextBurnTick || time > enemy.nextBurnTick)) {
       enemy.nextBurnTick = time + 350;
       damageEnemy.call(this, enemy, 0.5);
+    }
+  if (enemy.poisonUntil > time && (!enemy.nextPoisonTick || time > enemy.nextPoisonTick)) {
+      enemy.nextPoisonTick = time + 400;
+      damageEnemy.call(this, enemy, enemy.poisonDamage || 0.4);
+      enemy.setFillStyle(0x99ff66);
     }
   });
 }
@@ -1313,6 +1342,272 @@ class LaserWeapon extends AutoWeapon {
   }
 }
 
+class SkullWeapon extends AutoWeapon {
+  constructor(scene) {
+    super(scene, "skull", 5000);
+  }
+
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+
+    const radius = this.level >= 3 ? 280 : 200;
+    const poisonDuration = this.level >= 2 ? 2500 : 1500;
+    const stunDuration = this.level >= 4 ? 1000 : 500;
+
+    // 해골 문양 이펙트
+    this.showSkullEffect(radius);
+
+    const targets = findEnemiesInRange(player.x, player.y, radius);
+    targets.forEach((enemy) => {
+      // 스턴
+      enemy.stunnedUntil = time + stunDuration;
+      enemy.setFillStyle(0xcc99ff);
+
+      // 독
+      const stacks = this.level >= 5 ? 2 : 1;
+      enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, time + poisonDuration * stacks);
+      enemy.poisonDamage = getWeaponDamage(this.type, this.level) * 0.3;
+      enemy.nextPoisonTick = 0;
+
+      // 즉발 피해
+      damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level));
+    });
+  }
+
+  showSkullEffect(radius) {
+    // 외곽 링
+    const ring = this.scene.add.circle(player.x, player.y, radius, 0xcc99ff, 0)
+      .setStrokeStyle(3, 0xcc99ff, 0.7).setDepth(50);
+
+    // 내부 안개
+    const fog = this.scene.add.circle(player.x, player.y, radius * 0.85, 0x220033, 0.18).setDepth(49);
+
+    // 해골 심볼 (눈 두 개 + 코)
+    const skullX = player.x;
+    const skullY = player.y - 36;
+
+    const eye1 = this.scene.add.circle(skullX - 10, skullY, 6, 0xcc99ff, 0.9).setDepth(52);
+    const eye2 = this.scene.add.circle(skullX + 10, skullY, 6, 0xcc99ff, 0.9).setDepth(52);
+    const nose = this.scene.add.triangle(
+      skullX, skullY + 10,
+      -4, -4, 4, -4, 0, 6,
+      0xcc99ff, 0.7
+    ).setDepth(52);
+
+    const outer = this.scene.add.circle(skullX, skullY, 22, 0xcc99ff, 0)
+      .setStrokeStyle(2, 0xcc99ff, 0.5).setDepth(51);
+
+    // 파티클 독 방울
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      const drop = this.scene.add.circle(
+        player.x + Math.cos(angle) * radius * 0.5,
+        player.y + Math.sin(angle) * radius * 0.5,
+        4, 0x99ff66, 0.8
+      ).setDepth(51);
+
+      this.scene.tweens.add({
+        targets: drop,
+        x: player.x + Math.cos(angle) * radius,
+        y: player.y + Math.sin(angle) * radius,
+        alpha: 0,
+        scale: 0.2,
+        duration: 600,
+        onComplete: () => drop.destroy(),
+      });
+    }
+
+    this.scene.tweens.add({
+      targets: [ring, fog],
+      alpha: 0,
+      scale: 1.15,
+      duration: 700,
+      ease: "Cubic.easeOut",
+      onComplete: () => { ring.destroy(); fog.destroy(); },
+    });
+
+    this.scene.tweens.add({
+      targets: [eye1, eye2, nose, outer],
+      alpha: 0,
+      y: `-=18`,
+      duration: 800,
+      ease: "Cubic.easeOut",
+      onComplete: () => { eye1.destroy(); eye2.destroy(); nose.destroy(); outer.destroy(); },
+    });
+  }
+}
+
+class LungWeapon extends AutoWeapon {
+  constructor(scene) {
+    super(scene, "lung", 4000);
+  }
+
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+
+    const count = this.level >= 3 ? 5 : 3;
+    const radius = this.level >= 2 ? 130 : 95;
+    const damage = getWeaponDamage(this.type, this.level);
+    const burnOnHit = this.level >= 5;
+
+    for (let i = 0; i < count; i++) {
+      this.scene.time.delayedCall(i * 220, () => {
+        const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+        const dist = Phaser.Math.FloatBetween(40, 160);
+        const ex = player.x + Math.cos(angle) * dist;
+        const ey = player.y + Math.sin(angle) * dist;
+
+        explode.call(this.scene, ex, ey, radius, damage * (this.level >= 4 ? 1.4 : 1.0));
+
+        if (burnOnHit) {
+          findEnemiesInRange(ex, ey, radius).forEach((enemy) => {
+            enemy.burnUntil = Math.max(enemy.burnUntil || 0, this.scene.time.now + 1500);
+          });
+        }
+
+        // 연기 이펙트
+        const smoke = this.scene.add.circle(ex, ey, radius * 0.6, 0xff6622, 0.15).setDepth(38);
+        this.scene.tweens.add({
+          targets: smoke,
+          alpha: 0,
+          scale: 1.6,
+          y: smoke.y - 30,
+          duration: 500,
+          onComplete: () => smoke.destroy(),
+        });
+      });
+    }
+  }
+}
+
+class ScytheWeapon extends AutoWeapon {
+  constructor(scene) {
+    super(scene, "scythe", 2000);
+    this.swingAngle = 0;
+  }
+
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+
+    const swings = this.level >= 3 ? 2 : 1;
+    for (let i = 0; i < swings; i++) {
+      this.scene.time.delayedCall(i * 280, () => this.swing(time));
+    }
+
+    if (this.level >= 5) {
+      this.scene.time.delayedCall(600, () => this.spawnWhirlwind(time));
+    }
+  }
+
+  swing(time) {
+    const target = findNearestEnemy();
+    const range = this.level >= 2 ? 210 : 160;
+    const baseAngle = target
+      ? Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y)
+      : this.swingAngle;
+
+    this.swingAngle = baseAngle;
+
+    // 낫 호 — 크고 날카롭게
+    const arc = this.scene.add.arc(player.x, player.y, range, -75, 75, false, 0x88ffcc, 0.15)
+      .setAngle(Phaser.Math.RadToDeg(baseAngle))
+      .setStrokeStyle(10, 0x88ffcc, 0.85)
+      .setDepth(28);
+
+    const edge = this.scene.add.arc(player.x, player.y, range + 14, -68, 68, false, 0xffffff, 0)
+      .setAngle(Phaser.Math.RadToDeg(baseAngle))
+      .setStrokeStyle(3, 0xccffee, 0.95)
+      .setDepth(29);
+
+    // 손잡이
+    const handleEndX = player.x + Math.cos(baseAngle + Math.PI) * 55;
+    const handleEndY = player.y + Math.sin(baseAngle + Math.PI) * 55;
+    const handle = this.scene.add.line(
+      0, 0,
+      player.x, player.y,
+      handleEndX, handleEndY,
+      0x88ffcc, 0.6
+    ).setLineWidth(3).setDepth(27);
+
+    // 슬래시 잔상
+    for (let i = 0; i < 6; i++) {
+      const trailAngle = baseAngle - 0.55 + (i / 6) * 1.1;
+      const tx = player.x + Math.cos(trailAngle) * range;
+      const ty = player.y + Math.sin(trailAngle) * range;
+      const trail = this.scene.add.circle(tx, ty, 5, 0x88ffcc, 0.5).setDepth(27);
+      this.scene.tweens.add({
+        targets: trail,
+        alpha: 0,
+        scale: 0.1,
+        duration: 200 + i * 30,
+        onComplete: () => trail.destroy(),
+      });
+    }
+
+    this.scene.tweens.add({
+      targets: [arc, edge, handle],
+      alpha: 0,
+      scale: 1.08,
+      duration: 250,
+      ease: "Cubic.easeOut",
+      onComplete: () => { arc.destroy(); edge.destroy(); handle.destroy(); },
+    });
+
+    const pierce = this.level >= 4;
+    const hitEnemies = new Set();
+
+    findEnemiesInRange(player.x, player.y, range, pierce ? Infinity : 8).forEach((enemy) => {
+      const eAngle = Phaser.Math.Angle.Between(player.x, player.y, enemy.x, enemy.y);
+      const diff = Phaser.Math.Angle.Wrap(eAngle - baseAngle);
+      if (Math.abs(diff) <= 1.35 && !hitEnemies.has(enemy)) {
+        hitEnemies.add(enemy);
+        damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level));
+      }
+    });
+  }
+
+  spawnWhirlwind(time) {
+    const duration = 1800;
+    const radius = 120;
+    let elapsed = 0;
+    let angle = 0;
+
+    const timer = this.scene.time.addEvent({
+      delay: 80,
+      loop: true,
+      callback: () => {
+        elapsed += 80;
+        angle += 0.45;
+
+        const wx = player.x + Math.cos(angle) * 60;
+        const wy = player.y + Math.sin(angle) * 60;
+
+        const blade = this.scene.add.arc(wx, wy, 38, -90, 90, false, 0x88ffcc, 0.18)
+          .setAngle(Phaser.Math.RadToDeg(angle))
+          .setStrokeStyle(4, 0xccffee, 0.7)
+          .setDepth(30);
+
+        this.scene.tweens.add({
+          targets: blade,
+          alpha: 0,
+          scale: 1.2,
+          duration: 160,
+          onComplete: () => blade.destroy(),
+        });
+
+        findEnemiesInRange(wx, wy, radius * 0.55, 4).forEach((enemy) => {
+          damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level) * 0.35);
+        });
+
+        if (elapsed >= duration) timer.destroy();
+      },
+    });
+  }
+}
+
 function distanceToSegment(px, py, x1, y1, x2, y2) {
   const dx = x2 - x1;
   const dy = y2 - y1;
@@ -1331,6 +1626,9 @@ function createWeapon(scene, type) {
     case "lightning": return new LightningWeapon(scene);
     case "sword": return new SwordWeapon(scene);
     case "laser": return new LaserWeapon(scene);
+    case "skull":  return new SkullWeapon(scene);
+    case "lung":   return new LungWeapon(scene);
+    case "scythe": return new ScytheWeapon(scene);
     default: throw new Error(`Unknown weapon type: ${type}`);
   }
 }
