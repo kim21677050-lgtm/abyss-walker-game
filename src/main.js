@@ -119,7 +119,12 @@ const playerVelocity = {
   y: 0,
 };
 
-function preload() {}
+function preload() {
+  this.load.spritesheet("player", "assets/Soldier-Walk.png", {
+    frameWidth: 100,
+    frameHeight: 100,
+  });
+}
 
 function create() {
   // 모바일 멀티터치 등록
@@ -129,10 +134,27 @@ function create() {
 
   this.add.rectangle(0, 0, 10000, 10000, 0x050814).setOrigin(0);
 
-  player = this.add.rectangle(640, 360, 40, 40, 0x00ffd5);
-  this.physics.add.existing(player);
-  player.body.setDrag(800);
-  player.body.setMaxVelocity(400);
+  player = this.physics.add.sprite(640, 360, "player");
+player.setDisplaySize(200, 200);
+player.body.setDrag(800);
+player.body.setMaxVelocity(400);
+player.body.setSize(180, 180); // 충돌 범위 (표시 크기보다 약간 작게)
+
+this.anims.create({
+  key: "walk",
+  frames: this.anims.generateFrameNumbers("player", { start: 0, end: 7 }),
+  frameRate: 10,
+  repeat: -1,
+});
+
+this.anims.create({
+  key: "idle",
+  frames: this.anims.generateFrameNumbers("player", { start: 0, end: 0 }),
+  frameRate: 1,
+  repeat: -1,
+});
+
+player.play("idle");
 playerHp = playerMaxHp;
 gameStartTime = this.time.now;
 
@@ -279,6 +301,14 @@ updateHealthBar();
 
   levelText.setText(`Lv. ${level}`);
   updateExpHud();
+
+  if (!isDead) {
+  const touchingNow = enemies.getChildren().some((e) =>
+    e.active && Phaser.Math.Distance.Between(player.x, player.y, e.x, e.y) < 38
+  );
+  if (!touchingNow) player.clearTint();
+}
+
 }
 
 // ─── 조이스틱 ────────────────────────────────────────────
@@ -396,6 +426,13 @@ function movePlayer() {
   playerVelocity.x = Phaser.Math.Clamp(playerVelocity.x, -maxSpeed, maxSpeed);
   playerVelocity.y = Phaser.Math.Clamp(playerVelocity.y, -maxSpeed, maxSpeed);
   player.body.setVelocity(playerVelocity.x, playerVelocity.y);
+
+   const isMoving = Math.abs(playerVelocity.x) > 10 || Math.abs(playerVelocity.y) > 10;
+  if (isMoving && player.anims.currentAnim?.key !== "walk") {
+    player.play("walk");
+  } else if (!isMoving && player.anims.currentAnim?.key !== "idle") {
+    player.play("idle");
+  }
 }
 
 function pullExpOrbs() {
@@ -1665,7 +1702,7 @@ function applyContactDamage(delta) {
 
   playerHp -= damage;
 
-  player.setFillStyle(0xff8888);
+ player.setTint(0xff8888);
 
   if (this.time.now > lastDamageTime + 80) {
     lastDamageTime = this.time.now;
