@@ -538,6 +538,144 @@ function showDeathBurst(x, y) {
   }
 }
 
+function showLightningStrike(scene, x, y, isStorm = false) {
+  const height = isStorm ? 620 : 470;
+  const topY = y - height;
+  const bolt = scene.add.graphics().setDepth(70);
+  const glow = scene.add.graphics().setDepth(69);
+  const points = [];
+  const segments = 9;
+
+  for (let i = 0; i <= segments; i++) {
+    const progress = i / segments;
+    const spread = i === 0 || i === segments ? 0 : Phaser.Math.Between(-26, 26);
+    points.push({
+      x: x + spread,
+      y: topY + height * progress,
+    });
+  }
+
+  glow.lineStyle(isStorm ? 24 : 18, 0x9eeeff, 0.22);
+  bolt.lineStyle(isStorm ? 7 : 5, 0xeaffff, 0.96);
+  drawPolyline(glow, points);
+  drawPolyline(bolt, points);
+
+  for (let i = 2; i < points.length - 1; i += 2) {
+    const start = points[i];
+    const branchDirection = Math.random() < 0.5 ? -1 : 1;
+    const branch = scene.add.graphics().setDepth(70);
+    const endX = start.x + branchDirection * Phaser.Math.Between(36, 72);
+    const endY = start.y + Phaser.Math.Between(18, 52);
+
+    branch.lineStyle(2, 0xcff7ff, 0.86);
+    branch.beginPath();
+    branch.moveTo(start.x, start.y);
+    branch.lineTo((start.x + endX) / 2 + branchDirection * 14, (start.y + endY) / 2);
+    branch.lineTo(endX, endY);
+    branch.strokePath();
+
+    scene.tweens.add({
+      targets: branch,
+      alpha: 0,
+      duration: 140,
+      onComplete: () => branch.destroy(),
+    });
+  }
+
+  const impactGlow = scene.add.circle(x, y, isStorm ? 52 : 40, 0x99eeff, 0.32).setDepth(68);
+  const impactRing = scene.add.circle(x, y, isStorm ? 34 : 26, 0xffffff, 0)
+    .setStrokeStyle(4, 0xcff7ff, 0.9)
+    .setDepth(71);
+  const scorch = scene.add.circle(x, y + 4, isStorm ? 30 : 22, 0x23465a, 0.34).setDepth(8);
+
+  scene.tweens.add({
+    targets: [bolt, glow],
+    alpha: 0,
+    duration: 150,
+    onComplete: () => {
+      bolt.destroy();
+      glow.destroy();
+    },
+  });
+
+  scene.tweens.add({
+    targets: impactGlow,
+    alpha: 0,
+    scale: 1.7,
+    duration: 230,
+    onComplete: () => impactGlow.destroy(),
+  });
+
+  scene.tweens.add({
+    targets: impactRing,
+    alpha: 0,
+    scale: 2.1,
+    duration: 260,
+    onComplete: () => impactRing.destroy(),
+  });
+
+  scene.tweens.add({
+    targets: scorch,
+    alpha: 0,
+    duration: 900,
+    onComplete: () => scorch.destroy(),
+  });
+}
+
+function drawPolyline(graphics, points) {
+  graphics.beginPath();
+  graphics.moveTo(points[0].x, points[0].y);
+
+  for (let i = 1; i < points.length; i++) {
+    graphics.lineTo(points[i].x, points[i].y);
+  }
+
+  graphics.strokePath();
+}
+
+function showLaserBeam(scene, startX, startY, endX, endY, burn = false) {
+  const angle = Phaser.Math.Angle.Between(startX, startY, endX, endY);
+  const length = Phaser.Math.Distance.Between(startX, startY, endX, endY);
+  const midX = (startX + endX) / 2;
+  const midY = (startY + endY) / 2;
+  const glowColor = burn ? 0xff8844 : 0xff5533;
+  const core = scene.add.rectangle(midX, midY, length, 4, 0xffffff, 0.95)
+    .setRotation(angle)
+    .setDepth(61);
+  const beam = scene.add.rectangle(midX, midY, length, 10, 0xff5533, 0.82)
+    .setRotation(angle)
+    .setDepth(60);
+  const glow = scene.add.rectangle(midX, midY, length, 26, glowColor, 0.22)
+    .setRotation(angle)
+    .setDepth(59);
+  const muzzle = scene.add.circle(startX, startY, 22, 0xff5533, 0.35).setDepth(62);
+  const endpoint = scene.add.circle(endX, endY, 18, 0xffaa66, 0.25).setDepth(62);
+
+  scene.tweens.add({
+    targets: [core, beam, glow],
+    alpha: 0,
+    scaleY: 0.25,
+    duration: 180,
+    ease: "Cubic.easeOut",
+    onComplete: () => {
+      core.destroy();
+      beam.destroy();
+      glow.destroy();
+    },
+  });
+
+  scene.tweens.add({
+    targets: [muzzle, endpoint],
+    alpha: 0,
+    scale: 1.8,
+    duration: 180,
+    onComplete: () => {
+      muzzle.destroy();
+      endpoint.destroy();
+    },
+  });
+}
+
 function findNearestEnemy(excludeEnemy = null) {
   let nearest = null;
   let shortestDistance = Infinity;
@@ -754,52 +892,7 @@ class LightningWeapon extends AutoWeapon {
   }
 
   strike(target, time, damage = 1.5) {
-    const bolt = this.scene.add.line(0, 0, player.x, player.y, target.x, target.y, 0x66ccff, 0.95)
-      .setOrigin(0)
-      .setLineWidth(5)
-      .setDepth(50);
-    const glow = this.scene.add.line(0, 0, player.x, player.y, target.x, target.y, 0xccf6ff, 0.35)
-      .setOrigin(0)
-      .setLineWidth(14)
-      .setDepth(49);
-    const impact = this.scene.add.circle(target.x, target.y, 30, 0x99eeff, 0.3).setDepth(51);
-
-    for (let i = 0; i < 3; i++) {
-      const branchAngle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y) + Phaser.Math.FloatBetween(-1.1, 1.1);
-      const branchLength = Phaser.Math.Between(35, 75);
-      const branch = this.scene.add.line(
-        0,
-        0,
-        target.x,
-        target.y,
-        target.x + Math.cos(branchAngle) * branchLength,
-        target.y + Math.sin(branchAngle) * branchLength,
-        0xccf6ff,
-        0.72
-      )
-        .setOrigin(0)
-        .setLineWidth(2)
-        .setDepth(50);
-
-      this.scene.tweens.add({
-        targets: branch,
-        alpha: 0,
-        duration: 120,
-        onComplete: () => branch.destroy(),
-      });
-    }
-
-    this.scene.tweens.add({
-      targets: [bolt, glow, impact],
-      alpha: 0,
-      scale: 1.2,
-      duration: 130,
-      onComplete: () => {
-        bolt.destroy();
-        glow.destroy();
-        impact.destroy();
-      },
-    });
+    showLightningStrike(this.scene, target.x, target.y, this.level >= 5);
 
     if (this.level >= 4) {
       target.stunnedUntil = time + 700;
@@ -928,32 +1021,7 @@ class LaserWeapon extends AutoWeapon {
   fireLaser(angle, length, burn = false, damage = 1.2) {
     const endX = player.x + Math.cos(angle) * length;
     const endY = player.y + Math.sin(angle) * length;
-    const glow = this.scene.add.line(0, 0, player.x, player.y, endX, endY, 0xffaa66, 0.24)
-      .setOrigin(0)
-      .setLineWidth(18)
-      .setDepth(44);
-    const laser = this.scene.add.line(0, 0, player.x, player.y, endX, endY, 0xff5533, 0.78)
-      .setOrigin(0)
-      .setLineWidth(7)
-      .setDepth(45);
-    const core = this.scene.add.line(0, 0, player.x, player.y, endX, endY, 0xffffff, 0.75)
-      .setOrigin(0)
-      .setLineWidth(2)
-      .setDepth(45);
-    const emitter = this.scene.add.circle(player.x, player.y, 18, 0xff5533, 0.28).setDepth(46);
-
-    this.scene.tweens.add({
-      targets: [glow, laser, core, emitter],
-      alpha: 0,
-      scaleY: 0.65,
-      duration: 160,
-      onComplete: () => {
-        glow.destroy();
-        laser.destroy();
-        core.destroy();
-        emitter.destroy();
-      },
-    });
+    showLaserBeam(this.scene, player.x, player.y, endX, endY, burn);
 
     enemies.getChildren().forEach((enemy) => {
       const distance = distanceToSegment(
