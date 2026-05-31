@@ -82,6 +82,7 @@ let isChoosingWeapon = false;
 let enemyMaxHp = 3;
 let enemySpawnBonus = 0;
 let enemySpawnRemainder = 0;
+let joystick = null;
 
 const playerVelocity = {
   x: 0,
@@ -91,6 +92,9 @@ const playerVelocity = {
 function preload() {}
 
 function create() {
+  // 모바일 멀티터치 등록
+  this.input.addPointer(2);
+
   this.physics.world.setBounds(-3000, -3000, 6000, 6000);
 
   this.add.rectangle(0, 0, 10000, 10000, 0x050814).setOrigin(0);
@@ -171,12 +175,18 @@ function create() {
   weaponManager.addOrUpgrade("machineGun");
   updateWeaponHud();
   updateExpHud();
+
+  // 조이스틱 생성
+  createJoystick.call(this);
+
   layoutHud(this);
 
   this.scale.on("resize", (gameSize) => {
     layoutHud(this, gameSize.width, gameSize.height);
+    layoutJoystick(this, gameSize.width, gameSize.height);
     updateCameraZoom.call(this, gameSize.width);
   });
+
   updateCameraZoom.call(this, this.scale.width);
 }
 
@@ -204,6 +214,100 @@ function update(time, delta) {
   updateExpHud();
 }
 
+// ─── 조이스틱 ────────────────────────────────────────────
+
+function createJoystick() {
+  const base = this.add.circle(0, 0, 58, 0xffffff, 0.1)
+    .setStrokeStyle(3, 0x8df7ff, 0.45)
+    .setScrollFactor(0)
+    .setDepth(1500);
+
+  const knob = this.add.circle(0, 0, 24, 0x8df7ff, 0.35)
+    .setStrokeStyle(2, 0xffffff, 0.55)
+    .setScrollFactor(0)
+    .setDepth(1501);
+
+  // 터치 감지 영역 (base보다 넉넉하게)
+  const zone = this.add.zone(0, 0, 150, 150)
+    .setOrigin(0.5)
+    .setScrollFactor(0)
+    .setDepth(1502)
+    .setInteractive();
+
+  joystick = {
+    base,
+    knob,
+    zone,
+    pointerId: null,
+    active: false,
+    radius: 54,
+    vector: new Phaser.Math.Vector2(0, 0),
+  };
+
+  layoutJoystick(this);
+
+  zone.on("pointerdown", (pointer) => {
+    if (isChoosingWeapon) return;
+    joystick.pointerId = pointer.id;
+    joystick.active = true;
+    updateJoystick(pointer.x, pointer.y);
+  });
+
+  this.input.on("pointermove", (pointer) => {
+    if (!joystick.active || joystick.pointerId !== pointer.id) return;
+    updateJoystick(pointer.x, pointer.y);
+  });
+
+  this.input.on("pointerup", (pointer) => {
+    if (joystick.pointerId !== pointer.id) return;
+    resetJoystick();
+  });
+
+  this.input.on("pointerupoutside", (pointer) => {
+    if (joystick.pointerId !== pointer.id) return;
+    resetJoystick();
+  });
+}
+
+function layoutJoystick(scene, width = scene.scale.width, height = scene.scale.height) {
+  if (!joystick) return;
+
+  const compact = width < 760;
+  const x = compact ? 82 : 96;
+  const y = height - (compact ? 86 : 104);
+
+  joystick.base.setPosition(x, y);
+  joystick.knob.setPosition(x, y);
+  joystick.zone.setPosition(x, y);
+  joystick.zone.setSize(compact ? 170 : 190, compact ? 170 : 190);
+}
+
+function updateJoystick(pointerX, pointerY) {
+  const dx = pointerX - joystick.base.x;
+  const dy = pointerY - joystick.base.y;
+  const distance = Math.min(joystick.radius, Math.sqrt(dx * dx + dy * dy));
+  const angle = Math.atan2(dy, dx);
+
+  joystick.knob.setPosition(
+    joystick.base.x + Math.cos(angle) * distance,
+    joystick.base.y + Math.sin(angle) * distance
+  );
+
+  joystick.vector.set(
+    (Math.cos(angle) * distance) / joystick.radius,
+    (Math.sin(angle) * distance) / joystick.radius
+  );
+}
+
+function resetJoystick() {
+  joystick.active = false;
+  joystick.pointerId = null;
+  joystick.vector.set(0, 0);
+  joystick.knob.setPosition(joystick.base.x, joystick.base.y);
+}
+
+// ─── 플레이어 이동 ────────────────────────────────────────
+
 function movePlayer() {
   const acceleration = 40;
   const maxSpeed = 350;
@@ -216,16 +320,10 @@ function movePlayer() {
   playerVelocity.x *= 0.9;
   playerVelocity.y *= 0.9;
 
-  const pointer = player.scene.input.activePointer;
-  if (pointer.isDown && !isChoosingWeapon) {
-    const worldPoint = player.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    const angle = Phaser.Math.Angle.Between(player.x, player.y, worldPoint.x, worldPoint.y);
-    const distance = Phaser.Math.Distance.Between(player.x, player.y, worldPoint.x, worldPoint.y);
-
-    if (distance > 24) {
-      playerVelocity.x += Math.cos(angle) * acceleration;
-      playerVelocity.y += Math.sin(angle) * acceleration;
-    }
+  // 조이스틱 입력 반영
+  if (joystick?.active) {
+    playerVelocity.x += joystick.vector.x * acceleration * 1.55;
+    playerVelocity.y += joystick.vector.y * acceleration * 1.55;
   }
 
   playerVelocity.x = Phaser.Math.Clamp(playerVelocity.x, -maxSpeed, maxSpeed);
@@ -242,6 +340,8 @@ function pullExpOrbs() {
     }
   });
 }
+
+// ─── 레벨업 / 무기 선택 ───────────────────────────────────
 
 function showLevelUpText() {
   if (levelUpText) {
@@ -263,6 +363,12 @@ function showLevelUpText() {
 
 function pauseGameplay() {
   isChoosingWeapon = true;
+  if (joystick) {
+    resetJoystick();
+    joystick.base.setVisible(false);
+    joystick.knob.setVisible(false);
+    joystick.zone.disableInteractive();
+  }
   player.body.setVelocity(0, 0);
   this.physics.pause();
   spawnTimer.paused = true;
@@ -272,6 +378,11 @@ function pauseGameplay() {
 
 function resumeGameplay() {
   isChoosingWeapon = false;
+  if (joystick) {
+    joystick.base.setVisible(true);
+    joystick.knob.setVisible(true);
+    joystick.zone.setInteractive();
+  }
   this.physics.resume();
   spawnTimer.paused = false;
   enemyHealthTimer.paused = false;
@@ -299,7 +410,10 @@ function showWeaponSelection() {
 
   overlay.add([shade, title]);
 
+  let didSelect = false;
   const selectOption = (weaponType) => {
+    if (didSelect) return;
+    didSelect = true;
     weaponManager.addOrUpgrade(weaponType.id);
     updateWeaponHud();
     overlay.destroy(true);
@@ -322,11 +436,15 @@ function showWeaponSelection() {
     const nextLevel = owned ? Math.min(owned.level + 1, 5) : 1;
     const card = createWeaponCard.call(this, x, y, index + 1, weaponType, nextLevel);
     card.setScale(cardScale);
-    const hitZone = this.add.zone(x, y, 200 * cardScale, 260 * cardScale)
+
+    const hitZone = this.add.zone(x, y, 230 * cardScale, 286 * cardScale)
       .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2001 + index)
       .setInteractive({ useHandCursor: true });
 
     hitZone.on("pointerdown", () => selectOption(weaponType));
+    hitZone.on("pointerup", () => selectOption(weaponType));
     hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
     hitZone.on("pointerout", () => card.getByName("bg").setStrokeStyle(2, weaponType.color));
     overlay.add([card, hitZone]);
@@ -440,6 +558,8 @@ function getWeaponDamage(type, level) {
   return damageTable[type][Math.min(level, 5) - 1];
 }
 
+// ─── 적 스폰 ──────────────────────────────────────────────
+
 function spawnEnemy() {
   const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
   const distance = 1200;
@@ -480,6 +600,8 @@ function increaseEnemyMaxHp() {
 function increaseEnemySpawnAmount() {
   enemySpawnBonus += 0.15;
 }
+
+// ─── 전투 ────────────────────────────────────────────────
 
 function handleBulletHit(bullet, enemy) {
   damageEnemy.call(this, enemy, bullet.damage || 1);
@@ -596,6 +718,8 @@ function updateProjectiles(time) {
   });
 }
 
+// ─── 투사체 생성 ──────────────────────────────────────────
+
 function createProjectile(scene, x, y, color, radius = 6) {
   const bullet = scene.add.circle(x, y, radius, color);
   scene.physics.add.existing(bullet);
@@ -619,21 +743,15 @@ function createTracerProjectile(scene, x, y, angle, color = 0xffff66) {
   return bullet;
 }
 
+// ─── 이펙트 ───────────────────────────────────────────────
+
 function showMuzzleFlash(scene, x, y, angle, color = 0xffffaa) {
   const flash = scene.add.triangle(
     x + Math.cos(angle) * 18,
     y + Math.sin(angle) * 18,
-    0,
-    -7,
-    28,
-    0,
-    0,
-    7,
-    color,
-    0.85
-  )
-    .setRotation(angle)
-    .setDepth(38);
+    0, -7, 28, 0, 0, 7,
+    color, 0.85
+  ).setRotation(angle).setDepth(38);
 
   scene.tweens.add({
     targets: flash,
@@ -721,10 +839,7 @@ function showLightningStrike(scene, x, y, isStorm = false) {
   for (let i = 0; i <= segments; i++) {
     const progress = i / segments;
     const spread = i === 0 || i === segments ? 0 : Phaser.Math.Between(-26, 26);
-    points.push({
-      x: x + spread,
-      y: topY + height * progress,
-    });
+    points.push({ x: x + spread, y: topY + height * progress });
   }
 
   glow.lineStyle(isStorm ? 24 : 18, 0x9eeeff, 0.22);
@@ -756,20 +871,15 @@ function showLightningStrike(scene, x, y, isStorm = false) {
 
   const impactGlow = scene.add.circle(x, y, isStorm ? 52 : 40, 0x99eeff, 0.32).setDepth(68);
   const impactRing = scene.add.circle(x, y, isStorm ? 34 : 26, 0xffffff, 0)
-    .setStrokeStyle(4, 0xcff7ff, 0.9)
-    .setDepth(71);
+    .setStrokeStyle(4, 0xcff7ff, 0.9).setDepth(71);
   const scorch = scene.add.circle(x, y + 4, isStorm ? 30 : 22, 0x23465a, 0.34).setDepth(8);
 
   scene.tweens.add({
     targets: [bolt, glow],
     alpha: 0,
     duration: 150,
-    onComplete: () => {
-      bolt.destroy();
-      glow.destroy();
-    },
+    onComplete: () => { bolt.destroy(); glow.destroy(); },
   });
-
   scene.tweens.add({
     targets: impactGlow,
     alpha: 0,
@@ -777,7 +887,6 @@ function showLightningStrike(scene, x, y, isStorm = false) {
     duration: 230,
     onComplete: () => impactGlow.destroy(),
   });
-
   scene.tweens.add({
     targets: impactRing,
     alpha: 0,
@@ -785,7 +894,6 @@ function showLightningStrike(scene, x, y, isStorm = false) {
     duration: 260,
     onComplete: () => impactRing.destroy(),
   });
-
   scene.tweens.add({
     targets: scorch,
     alpha: 0,
@@ -797,11 +905,9 @@ function showLightningStrike(scene, x, y, isStorm = false) {
 function drawPolyline(graphics, points) {
   graphics.beginPath();
   graphics.moveTo(points[0].x, points[0].y);
-
   for (let i = 1; i < points.length; i++) {
     graphics.lineTo(points[i].x, points[i].y);
   }
-
   graphics.strokePath();
 }
 
@@ -811,15 +917,10 @@ function showLaserBeam(scene, startX, startY, endX, endY, burn = false) {
   const midX = (startX + endX) / 2;
   const midY = (startY + endY) / 2;
   const glowColor = burn ? 0xff8844 : 0xff5533;
-  const core = scene.add.rectangle(midX, midY, length, 4, 0xffffff, 0.95)
-    .setRotation(angle)
-    .setDepth(61);
-  const beam = scene.add.rectangle(midX, midY, length, 10, 0xff5533, 0.82)
-    .setRotation(angle)
-    .setDepth(60);
-  const glow = scene.add.rectangle(midX, midY, length, 26, glowColor, 0.22)
-    .setRotation(angle)
-    .setDepth(59);
+
+  const core = scene.add.rectangle(midX, midY, length, 4, 0xffffff, 0.95).setRotation(angle).setDepth(61);
+  const beam = scene.add.rectangle(midX, midY, length, 10, 0xff5533, 0.82).setRotation(angle).setDepth(60);
+  const glow = scene.add.rectangle(midX, midY, length, 26, glowColor, 0.22).setRotation(angle).setDepth(59);
   const muzzle = scene.add.circle(startX, startY, 22, 0xff5533, 0.35).setDepth(62);
   const endpoint = scene.add.circle(endX, endY, 18, 0xffaa66, 0.25).setDepth(62);
 
@@ -829,24 +930,18 @@ function showLaserBeam(scene, startX, startY, endX, endY, burn = false) {
     scaleY: 0.25,
     duration: 180,
     ease: "Cubic.easeOut",
-    onComplete: () => {
-      core.destroy();
-      beam.destroy();
-      glow.destroy();
-    },
+    onComplete: () => { core.destroy(); beam.destroy(); glow.destroy(); },
   });
-
   scene.tweens.add({
     targets: [muzzle, endpoint],
     alpha: 0,
     scale: 1.8,
     duration: 180,
-    onComplete: () => {
-      muzzle.destroy();
-      endpoint.destroy();
-    },
+    onComplete: () => { muzzle.destroy(); endpoint.destroy(); },
   });
 }
+
+// ─── 유틸 ─────────────────────────────────────────────────
 
 function findNearestEnemy(excludeEnemy = null) {
   let nearest = null;
@@ -891,6 +986,8 @@ function splitMissile(x, y) {
   });
 }
 
+// ─── 무기 클래스 ──────────────────────────────────────────
+
 class WeaponManager {
   constructor(scene) {
     this.scene = scene;
@@ -900,31 +997,15 @@ class WeaponManager {
 
   addOrUpgrade(type) {
     const owned = this.getWeapon(type);
-
-    if (owned) {
-      owned.upgrade();
-      return true;
-    }
-
-    if (this.weapons.length >= this.maxWeapons) {
-      return false;
-    }
-
+    if (owned) { owned.upgrade(); return true; }
+    if (this.weapons.length >= this.maxWeapons) return false;
     this.weapons.push(createWeapon(this.scene, type));
     return true;
   }
 
-  getWeapon(type) {
-    return this.weapons.find((weapon) => weapon.type === type);
-  }
-
-  getOwnedWeaponTypes() {
-    return this.weapons.map((weapon) => weapon.type);
-  }
-
-  tick(time, delta) {
-    this.weapons.forEach((weapon) => weapon.tick(time, delta));
-  }
+  getWeapon(type) { return this.weapons.find((w) => w.type === type); }
+  getOwnedWeaponTypes() { return this.weapons.map((w) => w.type); }
+  tick(time, delta) { this.weapons.forEach((w) => w.tick(time, delta)); }
 }
 
 class AutoWeapon {
@@ -934,16 +1015,11 @@ class AutoWeapon {
     this.level = 1;
     this.cooldown = cooldown;
     this.lastFire = 0;
-    this.definition = WEAPON_TYPES.find((weapon) => weapon.id === type);
+    this.definition = WEAPON_TYPES.find((w) => w.id === type);
   }
 
-  upgrade() {
-    this.level = Math.min(this.level + 1, 5);
-  }
-
-  canFire(time, cooldown = this.cooldown) {
-    return time > this.lastFire + cooldown;
-  }
+  upgrade() { this.level = Math.min(this.level + 1, 5); }
+  canFire(time, cooldown = this.cooldown) { return time > this.lastFire + cooldown; }
 }
 
 class MachineGunWeapon extends AutoWeapon {
@@ -1001,9 +1077,7 @@ class MachineGunWeapon extends AutoWeapon {
 }
 
 class MagicMissileWeapon extends AutoWeapon {
-  constructor(scene) {
-    super(scene, "magicMissile", 760);
-  }
+  constructor(scene) { super(scene, "magicMissile", 760); }
 
   tick(time) {
     if (!this.canFire(time)) return;
@@ -1060,18 +1134,18 @@ class LightningWeapon extends AutoWeapon {
 
     if (this.level >= 5 && time > this.lastStorm + 2500) {
       this.lastStorm = time;
-      findEnemiesInRange(player.x, player.y, 900, 5).forEach((target) => this.strike(target, time, getWeaponDamage(this.type, this.level) * 0.75));
+      findEnemiesInRange(player.x, player.y, 900, 5).forEach((target) =>
+        this.strike(target, time, getWeaponDamage(this.type, this.level) * 0.75)
+      );
     }
   }
 
   strike(target, time, damage = getWeaponDamage("lightning", this.level)) {
     showLightningStrike(this.scene, target.x, target.y, this.level >= 5);
-
     if (this.level >= 4) {
       target.stunnedUntil = time + 700;
       target.setFillStyle(0x99ddff);
     }
-
     damageEnemy.call(this.scene, target, damage);
   }
 }
@@ -1087,14 +1161,10 @@ class SwordWeapon extends AutoWeapon {
     if (this.canFire(time)) {
       this.lastFire = time;
       const swings = this.level >= 3 ? 2 : 1;
-
       for (let i = 0; i < swings; i++) {
         this.scene.time.delayedCall(i * 130, () => this.swing());
       }
-
-      if (this.level >= 4) {
-        this.swordWave();
-      }
+      if (this.level >= 4) this.swordWave();
     }
 
     if (this.level >= 5) {
@@ -1103,15 +1173,13 @@ class SwordWeapon extends AutoWeapon {
       const x = player.x + Math.cos(this.rotationAngle) * radius;
       const y = player.y + Math.sin(this.rotationAngle) * radius;
       const blade = this.scene.add.rectangle(x, y, 42, 10, 0xffd1dc, 0.85)
-        .setRotation(this.rotationAngle)
-        .setDepth(30);
+        .setRotation(this.rotationAngle).setDepth(30);
       this.scene.tweens.add({
         targets: blade,
         alpha: 0,
         duration: 90,
         onComplete: () => blade.destroy(),
       });
-
       if (time > this.lastSpinDamage + 250) {
         this.lastSpinDamage = time;
         findEnemiesInRange(player.x, player.y, radius + 35, 4).forEach((enemy) => {
@@ -1128,25 +1196,17 @@ class SwordWeapon extends AutoWeapon {
       ? Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y)
       : this.rotationAngle;
     const arc = this.scene.add.arc(player.x, player.y, range, -65, 65, false, 0xffd1dc, 0.2)
-      .setAngle(Phaser.Math.RadToDeg(angle))
-      .setStrokeStyle(8, 0xffffff, 0.55)
-      .setDepth(25);
+      .setAngle(Phaser.Math.RadToDeg(angle)).setStrokeStyle(8, 0xffffff, 0.55).setDepth(25);
     const edge = this.scene.add.arc(player.x, player.y, range + 10, -55, 55, false, 0xffffff, 0)
-      .setAngle(Phaser.Math.RadToDeg(angle))
-      .setStrokeStyle(3, 0xffd1dc, 0.9)
-      .setDepth(26);
+      .setAngle(Phaser.Math.RadToDeg(angle)).setStrokeStyle(3, 0xffd1dc, 0.9).setDepth(26);
 
     this.scene.tweens.add({
       targets: [arc, edge],
       alpha: 0,
       scale: 1.15,
       duration: 180,
-      onComplete: () => {
-        arc.destroy();
-        edge.destroy();
-      },
+      onComplete: () => { arc.destroy(); edge.destroy(); },
     });
-
     findEnemiesInRange(player.x, player.y, range, 8).forEach((enemy) => {
       damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level));
     });
@@ -1158,10 +1218,7 @@ class SwordWeapon extends AutoWeapon {
 
     const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
     const wave = this.scene.add.arc(player.x, player.y, 42, -62, 62, false, 0xffd1dc, 0.2)
-      .setStrokeStyle(12, 0xffffff, 0.75)
-      .setRotation(angle)
-      .setScale(1.25, 0.85)
-      .setDepth(31);
+      .setStrokeStyle(12, 0xffffff, 0.75).setRotation(angle).setScale(1.25, 0.85).setDepth(31);
 
     this.scene.physics.add.existing(wave);
     wave.body.setSize(76, 54);
@@ -1204,19 +1261,9 @@ class LaserWeapon extends AutoWeapon {
     showLaserBeam(this.scene, player.x, player.y, endX, endY, burn);
 
     enemies.getChildren().forEach((enemy) => {
-      const distance = distanceToSegment(
-        enemy.x,
-        enemy.y,
-        player.x,
-        player.y,
-        endX,
-        endY
-      );
-
+      const distance = distanceToSegment(enemy.x, enemy.y, player.x, player.y, endX, endY);
       if (distance <= 28) {
-        if (burn) {
-          enemy.burnUntil = this.scene.time.now + 1200;
-        }
+        if (burn) enemy.burnUntil = this.scene.time.now + 1200;
         damageEnemy.call(this.scene, enemy, damage);
       }
     });
@@ -1228,30 +1275,19 @@ function distanceToSegment(px, py, x1, y1, x2, y2) {
   const dy = y2 - y1;
   const lengthSquared = dx * dx + dy * dy;
 
-  if (lengthSquared === 0) {
-    return Phaser.Math.Distance.Between(px, py, x1, y1);
-  }
+  if (lengthSquared === 0) return Phaser.Math.Distance.Between(px, py, x1, y1);
 
   const t = Phaser.Math.Clamp(((px - x1) * dx + (py - y1) * dy) / lengthSquared, 0, 1);
-  const closestX = x1 + t * dx;
-  const closestY = y1 + t * dy;
-
-  return Phaser.Math.Distance.Between(px, py, closestX, closestY);
+  return Phaser.Math.Distance.Between(px, py, x1 + t * dx, y1 + t * dy);
 }
 
 function createWeapon(scene, type) {
   switch (type) {
-    case "machineGun":
-      return new MachineGunWeapon(scene);
-    case "magicMissile":
-      return new MagicMissileWeapon(scene);
-    case "lightning":
-      return new LightningWeapon(scene);
-    case "sword":
-      return new SwordWeapon(scene);
-    case "laser":
-      return new LaserWeapon(scene);
-    default:
-      throw new Error(`Unknown weapon type: ${type}`);
+    case "machineGun": return new MachineGunWeapon(scene);
+    case "magicMissile": return new MagicMissileWeapon(scene);
+    case "lightning": return new LightningWeapon(scene);
+    case "sword": return new SwordWeapon(scene);
+    case "laser": return new LaserWeapon(scene);
+    default: throw new Error(`Unknown weapon type: ${type}`);
   }
 }
