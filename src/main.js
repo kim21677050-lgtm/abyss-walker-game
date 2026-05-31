@@ -71,7 +71,9 @@ let weaponText;
 let levelUpText = null;
 let weaponManager;
 let spawnTimer;
+let enemyHealthTimer;
 let isChoosingWeapon = false;
+let enemyMaxHp = 3;
 
 const playerVelocity = {
   x: 0,
@@ -95,13 +97,19 @@ function create() {
   expOrbs = this.physics.add.group();
   weaponManager = new WeaponManager(this);
 
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < 50; i++) {
     spawnEnemy.call(this);
   }
 
   spawnTimer = this.time.addEvent({
-    delay: 800,
+    delay: 400,
     callback: () => spawnEnemy.call(this),
+    loop: true,
+  });
+
+  enemyHealthTimer = this.time.addEvent({
+    delay: 30000,
+    callback: () => increaseEnemyMaxHp.call(this),
     loop: true,
   });
 
@@ -189,7 +197,7 @@ function pullExpOrbs() {
     const distance = Phaser.Math.Distance.Between(player.x, player.y, orb.x, orb.y);
 
     if (distance < 150) {
-      this.physics.moveToObject(orb, player, 250);
+      this.physics.moveToObject(orb, player, 520);
     }
   });
 }
@@ -217,12 +225,14 @@ function pauseGameplay() {
   player.body.setVelocity(0, 0);
   this.physics.pause();
   spawnTimer.paused = true;
+  enemyHealthTimer.paused = true;
 }
 
 function resumeGameplay() {
   isChoosingWeapon = false;
   this.physics.resume();
   spawnTimer.paused = false;
+  enemyHealthTimer.paused = false;
 }
 
 function showWeaponSelection() {
@@ -335,10 +345,23 @@ function spawnEnemy() {
   const enemy = this.add.circle(x, y, 20, 0xff3355);
 
   this.physics.add.existing(enemy);
-  enemy.hp = 3;
+  enemy.maxHp = enemyMaxHp;
+  enemy.hp = enemy.maxHp;
   enemy.burnUntil = 0;
   enemy.stunnedUntil = 0;
   enemies.add(enemy);
+}
+
+function increaseEnemyMaxHp() {
+  enemyMaxHp += 5;
+
+  enemies.getChildren().forEach((enemy) => {
+    if (!enemy.active) return;
+
+    enemy.maxHp = (enemy.maxHp || enemyMaxHp - 5) + 5;
+    enemy.hp += 5;
+    showEnemyGrowthPulse.call(this, enemy.x, enemy.y);
+  });
 }
 
 function handleBulletHit(bullet, enemy) {
@@ -435,6 +458,10 @@ function updateProjectiles(time) {
       this.physics.moveToObject(bullet, bullet.target, bullet.speed || 520);
     }
 
+    if (bullet.isTracer && bullet.body) {
+      bullet.rotation = Math.atan2(bullet.body.velocity.y, bullet.body.velocity.x);
+    }
+
     if (bullet.burn && bullet.target && bullet.target.active) {
       bullet.target.burnUntil = Math.max(bullet.target.burnUntil || 0, time + 1200);
     }
@@ -457,6 +484,20 @@ function createProjectile(scene, x, y, color, radius = 6) {
   scene.physics.add.existing(bullet);
   bullet.trailColor = color;
   bullet.trailSize = radius;
+  bullets.add(bullet);
+  return bullet;
+}
+
+function createTracerProjectile(scene, x, y, angle, color = 0xffff66) {
+  const bullet = scene.add.rectangle(x, y, 22, 3, color, 0.95)
+    .setRotation(angle)
+    .setDepth(24);
+
+  scene.physics.add.existing(bullet);
+  bullet.body.setSize(22, 3);
+  bullet.isTracer = true;
+  bullet.trailColor = color;
+  bullet.trailSize = 3;
   bullets.add(bullet);
   return bullet;
 }
@@ -536,6 +577,20 @@ function showDeathBurst(x, y) {
       onComplete: () => shard.destroy(),
     });
   }
+}
+
+function showEnemyGrowthPulse(x, y) {
+  const pulse = this.add.circle(x, y, 24, 0xff3355, 0)
+    .setStrokeStyle(2, 0xff99aa, 0.75)
+    .setDepth(35);
+
+  this.tweens.add({
+    targets: pulse,
+    alpha: 0,
+    scale: 1.8,
+    duration: 260,
+    onComplete: () => pulse.destroy(),
+  });
 }
 
 function showLightningStrike(scene, x, y, isStorm = false) {
@@ -790,12 +845,13 @@ class MachineGunWeapon extends AutoWeapon {
         const target = findNearestEnemy();
         if (!target) return;
 
-        const bullet = createProjectile(this.scene, player.x + i * 10 - 5, player.y, 0xffff66);
         const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+        const shotColor = this.level >= 3 && this.shotCount % 8 === 0 ? 0x99ff66 : 0xffff66;
+        const bullet = createTracerProjectile(this.scene, player.x + i * 10 - 5, player.y, angle, shotColor);
         bullet.damage = 1;
         bullet.explodeRadius = this.level >= 4 ? 55 : 0;
         bullet.explodeDamage = 1;
-        bullet.trailColor = this.level >= 3 && this.shotCount % 8 === 0 ? 0x99ff66 : 0xffff66;
+        bullet.trailColor = shotColor;
         bullet.trailSize = 4;
 
         this.shotCount++;
@@ -816,8 +872,8 @@ class MachineGunWeapon extends AutoWeapon {
         const target = findNearestEnemy();
         if (!target) return;
 
-        const bullet = createProjectile(this.scene, player.x + offset, player.y - 30, 0x99ff66, 5);
         const angle = Phaser.Math.Angle.Between(player.x + offset, player.y - 30, target.x, target.y);
+        const bullet = createTracerProjectile(this.scene, player.x + offset, player.y - 30, angle, 0x99ff66);
         bullet.damage = 1;
         bullet.trailColor = 0x99ff66;
         showMuzzleFlash(this.scene, player.x + offset, player.y - 30, angle, 0x99ff66);
