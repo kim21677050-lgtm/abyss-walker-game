@@ -172,7 +172,7 @@ gameStartTime = this.time.now;
     if (exp >= expToNextLevel) {
       level++;
       exp = 0;
-      expToNextLevel += 3;
+      expToNextLevel += Math.floor(expToNextLevel * 0.4 + 4);
       showLevelUpText.call(this);
       showWeaponSelection.call(this);
     }
@@ -457,9 +457,9 @@ function resumeGameplay() {
 }
 
 function showWeaponSelection() {
-  pauseGameplay.call(this);
-
   const options = getRandomWeaponOptions();
+  if (options.length === 0) return; 
+  pauseGameplay.call(this);
   const overlay = this.add.container(0, 0).setScrollFactor(0).setDepth(2000);
   const shade = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.65)
     .setOrigin(0);
@@ -559,10 +559,15 @@ function createWeaponCard(x, y, number, weaponType, nextLevel) {
 
 function getRandomWeaponOptions() {
   const ownedWeapons = weaponManager.getOwnedWeaponTypes();
-  const pool = ownedWeapons.length >= weaponManager.maxWeapons
-    ? WEAPON_TYPES.filter((weapon) => ownedWeapons.includes(weapon.id))
-    : WEAPON_TYPES;
+  const maxedWeapons = weaponManager.weapons
+    .filter((w) => w.level >= 5)
+    .map((w) => w.type);
 
+  const pool = ownedWeapons.length >= weaponManager.maxWeapons
+    ? WEAPON_TYPES.filter((w) => ownedWeapons.includes(w.id) && !maxedWeapons.includes(w.id))
+    : WEAPON_TYPES.filter((w) => !maxedWeapons.includes(w.id));
+
+  if (pool.length === 0) return [];
   return Phaser.Utils.Array.Shuffle([...pool]).slice(0, 3);
 }
 
