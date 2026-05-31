@@ -231,6 +231,7 @@ healthBarGreen = this.add.rectangle(
   });
 
   updateCameraZoom.call(this, this.scale.width);
+  showStartScreen.call(this);
 }
 
 function update(time, delta) {
@@ -1488,4 +1489,124 @@ function killPlayer() {
       isDead = false;
     }
   );
+}
+
+function showStartScreen() {
+  // 게임플레이 일시정지
+  this.physics.pause();
+  spawnTimer.paused = true;
+  enemyHealthTimer.paused = true;
+  enemySpawnGrowthTimer.paused = true;
+  isChoosingWeapon = true;
+  if (joystick) {
+    resetJoystick();
+    joystick.base.setVisible(false);
+    joystick.knob.setVisible(false);
+    joystick.zone.disableInteractive();
+  }
+
+  const W = this.scale.width;
+  const H = this.scale.height;
+  const cx = W / 2;
+  const cy = H / 2;
+  const ui = this.add.container(0, 0).setScrollFactor(0).setDepth(9000);
+
+  // 배경 오버레이
+  const bg = this.add.rectangle(0, 0, W, H, 0x000000, 0.88).setOrigin(0);
+
+  // 장식선 — 위
+  const lineTop = this.add.rectangle(cx, cy - 112, 260, 1, 0x00ffd5, 0.35);
+
+  // 타이틀 — ABYSS
+  const title1 = this.add.text(cx, cy - 88, "ABYSS", {
+    fontSize: "64px",
+    color: "#00ffd5",
+    fontStyle: "bold",
+    letterSpacing: 18,
+  }).setOrigin(0.5);
+
+  // 타이틀 — WALKER (색상 다르게)
+  const title2 = this.add.text(cx, cy - 20, "WALKER", {
+    fontSize: "38px",
+    color: "#ffffff",
+    fontStyle: "bold",
+    letterSpacing: 22,
+    alpha: 0.82,
+  }).setOrigin(0.5);
+
+  // 장식선 — 아래
+  const lineBot = this.add.rectangle(cx, cy + 18, 260, 1, 0x00ffd5, 0.35);
+
+  // 부제
+  const sub = this.add.text(cx, cy + 44, "어둠 속을 걸어라", {
+    fontSize: "16px",
+    color: "#7ecfc0",
+    letterSpacing: 4,
+  }).setOrigin(0.5);
+
+  // 시작 버튼
+  const btnBg = this.add.rectangle(cx, cy + 108, 200, 48, 0x00ffd5, 0.12)
+    .setStrokeStyle(1.5, 0x00ffd5, 0.75);
+
+  const btnText = this.add.text(cx, cy + 108, "ENTER THE ABYSS", {
+    fontSize: "15px",
+    color: "#00ffd5",
+    fontStyle: "bold",
+    letterSpacing: 3,
+  }).setOrigin(0.5);
+
+  // 조작 안내 (작게)
+  const hint = this.add.text(cx, cy + 164, "WASD / 조이스틱으로 이동", {
+    fontSize: "13px",
+    color: "#446060",
+  }).setOrigin(0.5);
+
+  ui.add([bg, lineTop, title1, title2, lineBot, sub, btnBg, btnText, hint]);
+
+  // 버튼 깜빡이기 (pulse)
+  this.tweens.add({
+    targets: [btnBg, btnText],
+    alpha: { from: 0.6, to: 1 },
+    duration: 900,
+    yoyo: true,
+    repeat: -1,
+    ease: "Sine.easeInOut",
+  });
+
+  // 타이틀 fade-in
+  [bg, lineTop, title1, title2, lineBot, sub, btnBg, btnText, hint].forEach((obj, i) => {
+    obj.setAlpha(0);
+    this.tweens.add({
+      targets: obj,
+      alpha: i === 1 || i === 3 ? 0.35 : 1,
+      duration: 500,
+      delay: i * 80,
+    });
+  });
+
+  // 클릭 / 터치로 시작
+  btnBg.setInteractive({ useHandCursor: true });
+  btnText.setInteractive({ useHandCursor: true });
+
+  const startGame = () => {
+    ui.destroy(true);
+    this.physics.resume();
+    spawnTimer.paused = false;
+    enemyHealthTimer.paused = false;
+    enemySpawnGrowthTimer.paused = false;
+    isChoosingWeapon = false;
+    gameStartTime = this.time.now;
+    if (joystick) {
+      joystick.base.setVisible(true);
+      joystick.knob.setVisible(true);
+      joystick.zone.setInteractive();
+    }
+    this.input.keyboard.off("keydown-ENTER", startGame);
+    this.input.keyboard.off("keydown-SPACE", startGame);
+  };
+
+  btnBg.on("pointerdown", startGame);
+  btnText.on("pointerdown", startGame);
+  this.input.keyboard.on("keydown-ENTER", startGame);
+  this.input.keyboard.on("keydown-SPACE", startGame);
 }
