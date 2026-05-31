@@ -40,9 +40,13 @@ const WEAPON_TYPES = [
 
 const config = {
   type: Phaser.AUTO,
-  width: window.innerWidth,
-  height: window.innerHeight,
   backgroundColor: "#111111",
+  scale: {
+    mode: Phaser.Scale.RESIZE,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: window.innerWidth,
+    height: window.innerHeight,
+  },
   physics: {
     default: "arcade",
     arcade: {
@@ -73,8 +77,11 @@ let levelUpText = null;
 let weaponManager;
 let spawnTimer;
 let enemyHealthTimer;
+let enemySpawnGrowthTimer;
 let isChoosingWeapon = false;
 let enemyMaxHp = 3;
+let enemySpawnBonus = 0;
+let enemySpawnRemainder = 0;
 
 const playerVelocity = {
   x: 0,
@@ -104,13 +111,19 @@ function create() {
 
   spawnTimer = this.time.addEvent({
     delay: 400,
-    callback: () => spawnEnemy.call(this),
+    callback: () => spawnEnemyWave.call(this),
     loop: true,
   });
 
   enemyHealthTimer = this.time.addEvent({
     delay: 45000,
     callback: () => increaseEnemyMaxHp.call(this),
+    loop: true,
+  });
+
+  enemySpawnGrowthTimer = this.time.addEvent({
+    delay: 60000,
+    callback: () => increaseEnemySpawnAmount.call(this),
     loop: true,
   });
 
@@ -158,6 +171,13 @@ function create() {
   weaponManager.addOrUpgrade("machineGun");
   updateWeaponHud();
   updateExpHud();
+  layoutHud(this);
+
+  this.scale.on("resize", (gameSize) => {
+    layoutHud(this, gameSize.width, gameSize.height);
+    updateCameraZoom.call(this, gameSize.width);
+  });
+  updateCameraZoom.call(this, this.scale.width);
 }
 
 function update(time, delta) {
@@ -195,6 +215,18 @@ function movePlayer() {
 
   playerVelocity.x *= 0.9;
   playerVelocity.y *= 0.9;
+
+  const pointer = player.scene.input.activePointer;
+  if (pointer.isDown && !isChoosingWeapon) {
+    const worldPoint = player.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const angle = Phaser.Math.Angle.Between(player.x, player.y, worldPoint.x, worldPoint.y);
+    const distance = Phaser.Math.Distance.Between(player.x, player.y, worldPoint.x, worldPoint.y);
+
+    if (distance > 24) {
+      playerVelocity.x += Math.cos(angle) * acceleration;
+      playerVelocity.y += Math.sin(angle) * acceleration;
+    }
+  }
 
   playerVelocity.x = Phaser.Math.Clamp(playerVelocity.x, -maxSpeed, maxSpeed);
   playerVelocity.y = Phaser.Math.Clamp(playerVelocity.y, -maxSpeed, maxSpeed);
@@ -235,6 +267,7 @@ function pauseGameplay() {
   this.physics.pause();
   spawnTimer.paused = true;
   enemyHealthTimer.paused = true;
+  enemySpawnGrowthTimer.paused = true;
 }
 
 function resumeGameplay() {
@@ -242,6 +275,7 @@ function resumeGameplay() {
   this.physics.resume();
   spawnTimer.paused = false;
   enemyHealthTimer.paused = false;
+  enemySpawnGrowthTimer.paused = false;
 }
 
 function showWeaponSelection() {
@@ -252,7 +286,12 @@ function showWeaponSelection() {
   const shade = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.65)
     .setOrigin(0);
 
-  const title = this.add.text(this.scale.width / 2, this.scale.height / 2 - 170, "\uBB34\uAE30 \uC120\uD0DD", {
+  const isCompact = this.scale.width < 760;
+  const compactCardScale = Phaser.Math.Clamp((this.scale.height - 92) / (260 * 3 + 24), 0.54, 0.78);
+  const cardScale = isCompact ? compactCardScale : 1;
+  const compactCardHeight = 260 * cardScale;
+  const titleY = isCompact ? 28 : this.scale.height / 2 - 170;
+  const title = this.add.text(this.scale.width / 2, titleY, "\uBB34\uAE30 \uC120\uD0DD", {
     fontSize: "32px",
     color: "#ffffff",
     fontStyle: "bold",
@@ -273,12 +312,17 @@ function showWeaponSelection() {
   const keyHandlers = options.map((weaponType) => () => selectOption(weaponType));
 
   options.forEach((weaponType, index) => {
-    const x = this.scale.width / 2 + (index - 1) * 250;
-    const y = this.scale.height / 2;
+    const x = isCompact
+      ? this.scale.width / 2
+      : this.scale.width / 2 + (index - 1) * 250;
+    const y = isCompact
+      ? 62 + compactCardHeight / 2 + index * (compactCardHeight + 8)
+      : this.scale.height / 2;
     const owned = weaponManager.getWeapon(weaponType.id);
     const nextLevel = owned ? Math.min(owned.level + 1, 5) : 1;
     const card = createWeaponCard.call(this, x, y, index + 1, weaponType, nextLevel);
-    const hitZone = this.add.zone(x, y, 200, 260)
+    card.setScale(cardScale);
+    const hitZone = this.add.zone(x, y, 200 * cardScale, 260 * cardScale)
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
 
@@ -350,10 +394,34 @@ function updateWeaponHud() {
       .map((weapon) => `${weapon.definition.name} Lv.${weapon.level}`)
       .join(" / ")
   );
+  layoutHud(weaponText.scene);
 }
 
 function updateExpHud() {
   expInfoText.setText(`Lv. ${level}\nEXP ${exp}/${expToNextLevel}`);
+}
+
+function layoutHud(scene, width = scene.scale.width, height = scene.scale.height) {
+  const padding = Math.max(14, Math.min(24, width * 0.035));
+  const compact = width < 640;
+  const safeWidth = Math.max(150, width - padding * 2);
+
+  levelText.setPosition(padding, padding);
+  levelText.setFontSize(compact ? "18px" : "24px");
+
+  weaponText.setPosition(padding, compact ? padding + 34 : padding + 38);
+  weaponText.setFontSize(compact ? "12px" : "16px");
+  weaponText.setWordWrapWidth(compact ? Math.floor(safeWidth * 0.62) : Math.floor(safeWidth * 0.55));
+
+  expInfoText.setPosition(width - padding, padding);
+  expInfoText.setFontSize(compact ? "12px" : "15px");
+  expInfoText.setWordWrapWidth(Math.floor(safeWidth * 0.35));
+
+  scene.cameras.main.setViewport(0, 0, width, height);
+}
+
+function updateCameraZoom(width) {
+  this.cameras.main.setZoom(width < 640 ? 0.86 : 1.05);
 }
 
 function formatDamage(value) {
@@ -387,6 +455,16 @@ function spawnEnemy() {
   enemies.add(enemy);
 }
 
+function spawnEnemyWave() {
+  enemySpawnRemainder += 1 + enemySpawnBonus;
+  const spawnCount = Math.floor(enemySpawnRemainder);
+  enemySpawnRemainder -= spawnCount;
+
+  for (let i = 0; i < spawnCount; i++) {
+    spawnEnemy.call(this);
+  }
+}
+
 function increaseEnemyMaxHp() {
   enemyMaxHp += 5;
 
@@ -397,6 +475,10 @@ function increaseEnemyMaxHp() {
     enemy.hp += 5;
     showEnemyGrowthPulse.call(this, enemy.x, enemy.y);
   });
+}
+
+function increaseEnemySpawnAmount() {
+  enemySpawnBonus += 0.15;
 }
 
 function handleBulletHit(bullet, enemy) {
@@ -1074,12 +1156,19 @@ class SwordWeapon extends AutoWeapon {
     const target = findNearestEnemy();
     if (!target) return;
 
-    const wave = createProjectile(this.scene, player.x, player.y, 0xffd1dc, 8);
-    wave.setScale(1.6, 0.55);
-    wave.setRotation(Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y));
+    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+    const wave = this.scene.add.arc(player.x, player.y, 42, -62, 62, false, 0xffd1dc, 0.2)
+      .setStrokeStyle(12, 0xffffff, 0.75)
+      .setRotation(angle)
+      .setScale(1.25, 0.85)
+      .setDepth(31);
+
+    this.scene.physics.add.existing(wave);
+    wave.body.setSize(76, 54);
+    bullets.add(wave);
     wave.damage = getWeaponDamage(this.type, this.level) * 0.8;
     wave.trailColor = 0xffd1dc;
-    wave.trailSize = 10;
+    wave.trailSize = 18;
     this.scene.physics.moveToObject(wave, target, 520);
   }
 }
