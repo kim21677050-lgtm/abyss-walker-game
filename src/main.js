@@ -1806,6 +1806,15 @@ const restartBtnText = this.add
 
 const doRestart = () => {
   isDead = false;
+  exp = 0;
+  level = 1;
+  expToNextLevel = 5;
+  playerHp = playerMaxHp;
+  enemyMaxHp = 3;
+  enemySpawnBonus = 0;
+  enemySpawnRemainder = 0;
+  playerVelocity.x = 0;
+  playerVelocity.y = 0;
   this.scene.restart();
 };
 
