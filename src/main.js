@@ -323,36 +323,32 @@ function createJoystick() {
   const base = this.add.circle(0, 0, 58, 0xffffff, 0.1)
     .setStrokeStyle(3, 0x8df7ff, 0.45)
     .setScrollFactor(0)
-    .setDepth(1500);
+    .setDepth(1500)
+    .setVisible(false);
 
   const knob = this.add.circle(0, 0, 24, 0x8df7ff, 0.35)
     .setStrokeStyle(2, 0xffffff, 0.55)
     .setScrollFactor(0)
-    .setDepth(1501);
-
-  // 터치 감지 영역 (base보다 넉넉하게)
-  const zone = this.add.zone(0, 0, 150, 150)
-    .setOrigin(0.5)
-    .setScrollFactor(0)
-    .setDepth(1502)
-    .setInteractive();
+    .setDepth(1501)
+    .setVisible(false);
 
   joystick = {
     base,
     knob,
-    zone,
     pointerId: null,
     active: false,
     radius: 54,
     vector: new Phaser.Math.Vector2(0, 0),
   };
 
-  layoutJoystick(this);
-
-  zone.on("pointerdown", (pointer) => {
+  this.input.on("pointerdown", (pointer) => {
     if (isChoosingWeapon) return;
+    if (joystick.active) return; // 이미 활성화된 터치 있으면 무시
+
     joystick.pointerId = pointer.id;
     joystick.active = true;
+    joystick.base.setPosition(pointer.x, pointer.y).setVisible(true);
+    joystick.knob.setPosition(pointer.x, pointer.y).setVisible(true);
     updateJoystick(pointer.x, pointer.y);
   });
 
@@ -372,17 +368,8 @@ function createJoystick() {
   });
 }
 
-function layoutJoystick(scene, width = scene.scale.width, height = scene.scale.height) {
-  if (!joystick) return;
-
-  const compact = width < 760;
-  const x = compact ? 82 : 96;
-  const y = height - (compact ? 86 : 104);
-
-  joystick.base.setPosition(x, y);
-  joystick.knob.setPosition(x, y);
-  joystick.zone.setPosition(x, y);
-  joystick.zone.setSize(compact ? 170 : 190, compact ? 170 : 190);
+function layoutJoystick() {
+  // 동적 생성 방식이라 고정 위치 없음
 }
 
 function updateJoystick(pointerX, pointerY) {
@@ -406,7 +393,8 @@ function resetJoystick() {
   joystick.active = false;
   joystick.pointerId = null;
   joystick.vector.set(0, 0);
-  joystick.knob.setPosition(joystick.base.x, joystick.base.y);
+  joystick.base.setVisible(false);
+  joystick.knob.setVisible(false);
 }
 
 // ─── 플레이어 이동 ────────────────────────────────────────
@@ -473,12 +461,7 @@ function showLevelUpText() {
 
 function pauseGameplay() {
   isChoosingWeapon = true;
-  if (joystick) {
-    resetJoystick();
-    joystick.base.setVisible(false);
-    joystick.knob.setVisible(false);
-    joystick.zone.disableInteractive();
-  }
+  if (joystick) resetJoystick();
   player.body.setVelocity(0, 0);
   this.physics.pause();
   spawnTimer.paused = true;
@@ -488,11 +471,6 @@ function pauseGameplay() {
 
 function resumeGameplay() {
   isChoosingWeapon = false;
-  if (joystick) {
-    joystick.base.setVisible(true);
-    joystick.knob.setVisible(true);
-    joystick.zone.setInteractive();
-  }
   this.physics.resume();
   spawnTimer.paused = false;
   enemyHealthTimer.paused = false;
@@ -1841,13 +1819,7 @@ function showStartScreen() {
   enemyHealthTimer.paused = true;
   enemySpawnGrowthTimer.paused = true;
   isChoosingWeapon = true;
-  if (joystick) {
-    resetJoystick();
-    joystick.base.setVisible(false);
-    joystick.knob.setVisible(false);
-    joystick.zone.disableInteractive();
-  }
-
+ 
   const W = this.scale.width;
   const H = this.scale.height;
   const cx = W / 2;
@@ -1899,20 +1871,15 @@ function showStartScreen() {
     });
   });
 
-  const startGame = () => {
-    objs.forEach((obj) => obj.destroy());
-    this.physics.resume();
-    spawnTimer.paused = false;
-    enemyHealthTimer.paused = false;
-    enemySpawnGrowthTimer.paused = false;
-    isChoosingWeapon = false;
-    gameStartTime = this.time.now;
-    if (joystick) {
-      joystick.base.setVisible(true);
-      joystick.knob.setVisible(true);
-      joystick.zone.setInteractive();
-    }
-  };
+const startGame = () => {
+  objs.forEach((obj) => obj.destroy());
+  this.physics.resume();
+  spawnTimer.paused = false;
+  enemyHealthTimer.paused = false;
+  enemySpawnGrowthTimer.paused = false;
+  isChoosingWeapon = false;
+  gameStartTime = this.time.now;
+};
 
   btnBg.on("pointerdown", startGame);
   btnText.on("pointerdown", startGame);
