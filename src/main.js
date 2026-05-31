@@ -31,6 +31,8 @@ let level = 1;
 let expToNextLevel = 5;
 let levelText;
 let levelUpText = null;
+let weaponType = "gun"; // 기본 무기
+let weaponLevel = 1;
 
 const playerVelocity = {
   x: 0,
@@ -174,6 +176,19 @@ this.time.delayedCall(1000, () => {
 // 🎮 전체 밝기 느낌 강화
 this.cameras.main.setZoom(1.05); // 살짝 확대 느낌
 
+// =========================
+// 🧪 무기 변경 테스트
+// =========================
+this.input.keyboard.on("keydown-ONE", () => {
+  weaponType = "gun";
+  console.log("gun 선택");
+});
+
+this.input.keyboard.on("keydown-TWO", () => {
+  weaponType = "shotgun";
+  console.log("shotgun 선택");
+});
+
 }
 
 function update(time) {
@@ -224,22 +239,29 @@ function update(time) {
     this.physics.moveToObject(enemy, player, 180);
   });
 
-  // 자동 공격
-  if (time > lastShot + 400) {
-    shootBullet.call(this);
-    lastShot = time;
+// 🔫 자동 공격 (무기 시스템)
+if (time > lastShot + 400) {
+  if (weaponType === "gun") {
+    shootGun.call(this);
   }
+
+  if (weaponType === "shotgun") {
+    shootShotgun.call(this);
+  }
+
+  lastShot = time;
+}
 
   // 경험치 구슬 끌어당김
 expOrbs.getChildren().forEach((orb) => {
-  const distance =
-    Phaser.Math.Distance.Between(
-      player.x,
-      player.y,
-      orb.x,
-      orb.y
-    )
-    levelText.setText(`Lv. ${level}`);
+ const distance = Phaser.Math.Distance.Between(
+  player.x,
+  player.y,
+  orb.x,
+  orb.y
+);
+
+levelText.setText(`Lv. ${level}`);
 
   if (distance < 150) {
     this.physics.moveToObject(
@@ -273,27 +295,47 @@ function spawnEnemy() {
   enemies.add(enemy);
 }
 
-function shootBullet() {
+// =========================
+// 🔫 기본 무기 (단일 총)
+// =========================
+function shootGun() {
   const nearestEnemy = findNearestEnemy();
 
   if (!nearestEnemy) return;
 
-  const bullet = this.add.circle(
-  player.x,
-  player.y,
-  6,
-  0xffff66 // 밝은 에너지 노랑
-);
+  const bullet = this.add.circle(player.x, player.y, 6, 0xffff66);
 
   this.physics.add.existing(bullet);
   bullets.add(bullet);
 
-  this.physics.moveToObject(
-    bullet,
-    nearestEnemy,
-    600
-  );
+  this.physics.moveToObject(bullet, nearestEnemy, 600);
 }
+
+// =========================
+// 🔫 샷건 (수정 버전)
+// =========================
+function shootShotgun() {
+  const nearestEnemy = findNearestEnemy();
+  if (!nearestEnemy) return;
+
+  const baseAngle = Phaser.Math.Angle.Between(
+    player.x,
+    player.y,
+    nearestEnemy.x,
+    nearestEnemy.y
+  );
+
+  for (let i = -1; i <= 1; i++) {
+    const angle = baseAngle + i * 0.2;
+
+    const bullet = this.add.circle(player.x, player.y, 6, 0xffff66);
+    this.physics.add.existing(bullet);
+    bullets.add(bullet);
+
+    this.physics.velocityFromRotation(angle, 600, bullet.body.velocity);
+  }
+}bind(this);
+
 
 function findNearestEnemy() {
   let nearest = null;
