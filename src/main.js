@@ -135,6 +135,31 @@ let bgChunks = new Map();
 const CHUNK_SIZE = 512, CHUNK_RENDER_RADIUS = 3;
 const playerVelocity = { x: 0, y: 0 };
 
+function makeText(scene, x, y, content, style = {}) {
+  const isMobile = scene.scale.width < 768;
+  const baseSize = parseInt(style.fontSize ?? "16px");
+  const scaledSize = isMobile ? Math.round(baseSize * 1.35) : baseSize;
+
+  const defaultStyle = {
+    fontFamily: "'Arial Black', 'Arial Bold', Arial, sans-serif",
+    fontSize: `${scaledSize}px`,
+    color: "#ffffff",
+    stroke: "#000000",
+    strokeThickness: isMobile ? 4 : 2,
+    shadow: {
+      offsetX: 0, offsetY: 1,
+      color: "#000000",
+      blur: isMobile ? 6 : 3,
+      fill: true,
+    },
+  };
+
+  return scene.add.text(x, y, content, { ...defaultStyle, ...style,
+    fontSize: `${scaledSize}px`,
+    strokeThickness: style.strokeThickness ?? (isMobile ? 4 : 2),
+  });
+}
+
 function preload() {
   for (let i = 1; i <= 6; i++) this.load.image(`player_${i}`, `assets/hero-run-${i}.png`);
   this.load.image("death-scythe", "assets/death-scythe.png");
@@ -731,15 +756,15 @@ function create() {
   this.cameras.main.startFollow(player, true, 0.08, 0.08);
   this.cameras.main.setZoom(1.05);
 
-  levelText = this.add.text(20, 20, `Lv. ${level}`, { fontSize: "24px", color: "#ffffff" }).setScrollFactor(0).setDepth(1000);
-  timerText = this.add.text(this.scale.width / 2, 20, "00:00", { fontSize: "22px", color: "#ffffff", fontStyle: "bold" }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1000);
-  expInfoText = this.add.text(this.scale.width - 20, 20, "", { fontSize: "15px", color: "#ffffff", align: "right" }).setOrigin(1, 0).setScrollFactor(0).setDepth(1000);
+  levelText = makeText(this, 20, 20, `Lv. ${level}`, { fontSize: "24px", color: "#ffffff" }).setScrollFactor(0).setDepth(1000);
+timerText = makeText(this, this.scale.width / 2, 20, "00:00", { fontSize: "22px", color: "#ffffff", fontStyle: "bold" }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1000);
+expInfoText = makeText(this, this.scale.width - 20, 20, "", { fontSize: "15px", color: "#ffffff", align: "right" }).setOrigin(1, 0).setScrollFactor(0).setDepth(1000);
 
   healthBarBg    = this.add.rectangle(this.scale.width - 210, 72, 180, 10, 0x441111).setOrigin(0, 0).setScrollFactor(0).setDepth(1000);
   healthBarRed   = this.add.rectangle(this.scale.width - 210, 72, 180, 10, 0xaa2222).setOrigin(0, 0).setScrollFactor(0).setDepth(1001);
   healthBarGreen = this.add.rectangle(this.scale.width - 210, 72, 180, 10, 0x00ff66).setOrigin(0, 0).setScrollFactor(0).setDepth(1002);
 
-  weaponText = this.add.text(20, 52, "", { fontSize: "16px", color: "#b7f7ff" }).setScrollFactor(0).setDepth(1000);
+  weaponText = makeText(this, 20, 52, "", { fontSize: "16px", color: "#b7f7ff" }).setScrollFactor(0).setDepth(1000);
 
   cursors = this.input.keyboard.addKeys({ up: "W", down: "S", left: "A", right: "D" });
   weaponManager.addOrUpgrade("machineGun");
@@ -921,9 +946,9 @@ class PathManager {
     this.scene.tweens.add({ targets: [ring, glow], alpha: 0, scale: 1.3, duration: 500, onComplete: () => { ring.destroy(); glow.destroy(); } });
     explode.call(this.scene, player.x, player.y, radius, 18.0);
 
-    const text = this.scene.add.text(player.x, player.y - 60, "만상무예!", {
-      fontSize: "26px", color: "#ff8800", fontStyle: "bold",
-    }).setOrigin(0.5).setDepth(200);
+    const text = makeText(scene, player.x, player.y - 60, "만상무예!", {
+  fontSize: "26px", color: "#ff8800", fontStyle: "bold",
+}).setOrigin(0.5).setDepth(200);
     this.scene.tweens.add({ targets: text, alpha: 0, y: player.y - 120, duration: 1000, onComplete: () => text.destroy() });
   }
 
@@ -1236,37 +1261,54 @@ function showPathSelection() {
 
 function createPathCard(x, y, path) {
   const card = this.add.container(x, y);
-  const cardW = 200, cardH = 320;
+  const cardW = 200;
+
+  // 스킬 개수에 따라 카드 높이 동적 계산
+  const skillDefs = PATH_TYPES[path.id].skills.map((sid) => PATH_SKILLS[sid]);
+  const skillAreaH = skillDefs.length * 48;
+  const cardH = 220 + skillAreaH;
 
   const bg = this.add.rectangle(0, 0, cardW, cardH, 0x0a0e1a, 0.97)
     .setStrokeStyle(2, path.color).setName("bg");
 
+  const topOffset = -cardH / 2;
+
   // 아이콘
-  const icon = this.add.text(0, -110, path.icon, { fontSize: "56px" }).setOrigin(0.5);
-  const name = this.add.text(0, -46, path.name, {
-    fontSize: "22px", color: "#ffffff", fontStyle: "bold",
+  const icon = this.add.text(0, topOffset + 36, path.icon, { fontSize: "48px" }).setOrigin(0.5);
+  const name = this.add.text(0, topOffset + 92, path.name, {
+    fontSize: "20px", color: "#ffffff", fontStyle: "bold",
   }).setOrigin(0.5);
 
-  const divider = this.add.rectangle(0, -20, 120, 1, path.color, 0.5);
+  const divider = this.add.rectangle(0, topOffset + 114, 120, 1, path.color, 0.5);
 
-  const desc = this.add.text(0, 14, path.desc, {
-    fontSize: "13px", color: "#aabbaa", align: "center", wordWrap: { width: 170 },
+  const desc = this.add.text(0, topOffset + 136, path.desc, {
+    fontSize: "12px", color: "#aabbaa", align: "center", wordWrap: { width: 170 },
   }).setOrigin(0.5);
-
-  // 스킬 미리보기
-  const skillDefs = PATH_TYPES[path.id].skills.map((sid) => PATH_SKILLS[sid]);
-  skillDefs.forEach((sk, idx) => {
-    const sy = 76 + idx * 44;
-    const skillBg = this.add.rectangle(0, sy, 180, 38, 0x111922, 0.9)
-      .setStrokeStyle(1, path.color, 0.3);
-    const skillIcon = this.add.text(-76, sy, sk.icon, { fontSize: "18px" }).setOrigin(0.5);
-    const skillName = this.add.text(-52, sy, sk.name, {
-      fontSize: "14px", color: `#${path.color.toString(16).padStart(6, "0")}`, fontStyle: "bold",
-    }).setOrigin(0, 0.5);
-    card.add([skillBg, skillIcon, skillName]);
-  });
 
   card.add([bg, icon, name, divider, desc]);
+
+  // 스킬 목록 — desc 아래부터 시작
+  const skillStartY = topOffset + 172;
+  skillDefs.forEach((sk, idx) => {
+    const sy = skillStartY + idx * 48;
+
+    const skillBg = this.add.rectangle(0, sy, 182, 40, 0x111922, 0.9)
+      .setStrokeStyle(1, path.color, 0.35);
+    const skillIcon = this.add.text(-76, sy, sk.icon, { fontSize: "16px" }).setOrigin(0.5);
+    const skillName = this.add.text(-54, sy - 8, sk.name, {
+      fontSize: "13px",
+      color: `#${path.color.toString(16).padStart(6, "0")}`,
+      fontStyle: "bold",
+    }).setOrigin(0, 0.5);
+    const skillDesc = this.add.text(-54, sy + 8, sk.desc, {
+      fontSize: "10px", color: "#99aaaa",
+      wordWrap: { width: 128 },
+    }).setOrigin(0, 0.5);
+
+    card.add([skillBg, skillIcon, skillName, skillDesc]);
+  });
+
+  
   return card;
 }
 
@@ -1523,19 +1565,20 @@ function showTimeStopEnd(scene) {
 }
 
 function showBaekNotice(scene) {
-  const text = scene.add.text(player.x, player.y - 50, "백경무예!", {
+  const text = makeText(scene, player.x, player.y - 50, "백경무예!", {
     fontSize: "22px", color: "#ffee44", fontStyle: "bold",
   }).setOrigin(0.5).setDepth(200);
   scene.tweens.add({ targets: text, alpha: 0, y: player.y - 110, duration: 900, onComplete: () => text.destroy() });
 }
 
+
 function showShedEffect(scene) {
   const ring = scene.add.circle(player.x, player.y, 80, 0x44ff88, 0)
     .setStrokeStyle(4, 0x44ff88, 0.9).setDepth(80);
   scene.tweens.add({ targets: ring, alpha: 0, scale: 2.2, duration: 600, onComplete: () => ring.destroy() });
-  const text = scene.add.text(player.x, player.y - 52, "🐍 시해!", {
-    fontSize: "22px", color: "#44ff88", fontStyle: "bold",
-  }).setOrigin(0.5).setDepth(200);
+ const text = makeText(scene, player.x, player.y - 52, "🐍 시해!", {
+  fontSize: "22px", color: "#44ff88", fontStyle: "bold",
+}).setOrigin(0.5).setDepth(200);
   scene.tweens.add({ targets: text, alpha: 0, y: player.y - 110, duration: 900, onComplete: () => text.destroy() });
 }
 
@@ -1543,17 +1586,16 @@ function showDevourEffect(scene, range) {
   const ring = scene.add.circle(player.x, player.y, range, 0x22ffcc, 0)
     .setStrokeStyle(3, 0x22ffcc, 0.8).setDepth(80);
   scene.tweens.add({ targets: ring, alpha: 0, scale: 1.3, duration: 500, onComplete: () => ring.destroy() });
-  const text = scene.add.text(player.x, player.y - 52, "🦷 탐식!", {
-    fontSize: "22px", color: "#22ffcc", fontStyle: "bold",
-  }).setOrigin(0.5).setDepth(200);
+  const text = makeText(scene, player.x, player.y - 52, "🦷 탐식!", {
+  fontSize: "22px", color: "#22ffcc", fontStyle: "bold",
+}).setOrigin(0.5).setDepth(200);
   scene.tweens.add({ targets: text, alpha: 0, y: player.y - 110, duration: 900, onComplete: () => text.destroy() });
 }
 
 function showDreamEffect(scene) {
-  const text = scene.add.text(scene.scale.width / 2, scene.scale.height / 2 - 60, "😴 괴물의 꿈", {
-    fontSize: "32px", color: "#88ff44", fontStyle: "bold",
-    shadow: { blur: 14, color: "#000", fill: true },
-  }).setOrigin(0.5).setScrollFactor(0).setDepth(4001);
+  const text = makeText(scene, scene.scale.width / 2, scene.scale.height / 2 - 60, "😴 괴물의 꿈", {
+  fontSize: "32px", color: "#88ff44", fontStyle: "bold",
+}).setOrigin(0.5).setScrollFactor(0).setDepth(4001);
   scene.tweens.add({ targets: text, alpha: 0, y: scene.scale.height / 2 - 120, duration: 1500, delay: 400, onComplete: () => text.destroy() });
 }
 
@@ -2140,17 +2182,17 @@ function killPlayer() {
 
   const overlay = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.75)
     .setOrigin(0).setScrollFactor(0).setDepth(5000);
-  this.add.text(this.scale.width / 2, this.scale.height / 2 - 50, chosen, {
+  makeText(this, this.scale.width / 2, this.scale.height / 2 - 50, chosen, {
     fontSize: "52px", color: "#ff4444", fontStyle: "bold",
   }).setOrigin(0.5).setScrollFactor(0).setDepth(5001);
-  this.add.text(this.scale.width / 2, this.scale.height / 2 + 10, `생존 시간 ${surviveTime}초`, {
+  makeText(this, this.scale.width / 2, this.scale.height / 2 + 10, `생존 시간 ${surviveTime}초`, {
     fontSize: "24px", color: "#ffffff",
   }).setOrigin(0.5).setScrollFactor(0).setDepth(5001);
 
   const restartBtnBg = this.add.rectangle(this.scale.width / 2, this.scale.height / 2 + 70, 180, 44, 0xff4444, 0.15)
     .setStrokeStyle(1.5, 0xff4444, 0.75).setScrollFactor(0).setDepth(5001)
     .setInteractive({ useHandCursor: true });
-  const restartBtnText = this.add.text(this.scale.width / 2, this.scale.height / 2 + 70, "RESTART", {
+  const restartBtnText = makeText(this, this.scale.width / 2, this.scale.height / 2 + 70, "RESTART", {
     fontSize: "18px", color: "#ff4444", fontStyle: "bold", letterSpacing: 4,
   }).setOrigin(0.5).setScrollFactor(0).setDepth(5002).setInteractive({ useHandCursor: true });
 
@@ -2175,13 +2217,13 @@ function showStartScreen() {
   const objs = [];
   const bg = this.add.rectangle(0, 0, W, H, 0x000000, 0.88).setOrigin(0).setScrollFactor(0).setDepth(9000);
   const lineTop = this.add.rectangle(cx, cy - 112, 260, 1, 0x00ffd5, 0.35).setScrollFactor(0).setDepth(9001);
-  const title1 = this.add.text(cx, cy - 88, "ABYSS", { fontSize: "64px", color: "#00ffd5", fontStyle: "bold", letterSpacing: 18 }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
-  const title2 = this.add.text(cx, cy - 20, "WALKER", { fontSize: "38px", color: "#ffffff", fontStyle: "bold", letterSpacing: 22 }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const title1 = makeText(this, cx, cy - 88, "ABYSS", { fontSize: "64px", color: "#00ffd5", fontStyle: "bold", letterSpacing: 18 }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const title2 = makeText(this, cx, cy - 20, "WALKER", { fontSize: "38px", color: "#ffffff", fontStyle: "bold", letterSpacing: 22 }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
   const lineBot = this.add.rectangle(cx, cy + 18, 260, 1, 0x00ffd5, 0.35).setScrollFactor(0).setDepth(9001);
-  const sub = this.add.text(cx, cy + 44, "어둠 속을 걸어라", { fontSize: "16px", color: "#7ecfc0", letterSpacing: 4 }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const sub = makeText(this, cx, cy + 44, "어둠 속을 걸어라", { fontSize: "16px", color: "#7ecfc0", letterSpacing: 4 }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
   const btnBg = this.add.rectangle(cx, cy + 108, 200, 48, 0x00ffd5, 0.12).setStrokeStyle(1.5, 0x00ffd5, 0.75).setScrollFactor(0).setDepth(9002).setInteractive({ useHandCursor: true });
-  const btnText = this.add.text(cx, cy + 108, "ENTER THE ABYSS", { fontSize: "15px", color: "#00ffd5", fontStyle: "bold", letterSpacing: 3 }).setOrigin(0.5).setScrollFactor(0).setDepth(9003).setInteractive({ useHandCursor: true });
-  const hint = this.add.text(cx, cy + 164, "WASD / 조이스틱으로 이동", { fontSize: "12px", color: "#446060" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const btnText = makeText(this, cx, cy + 108, "ENTER THE ABYSS", { fontSize: "15px", color: "#00ffd5", fontStyle: "bold", letterSpacing: 3 }).setOrigin(0.5).setScrollFactor(0).setDepth(9003).setInteractive({ useHandCursor: true });
+  const hint = makeText(this, cx, cy + 164, "WASD / 조이스틱으로 이동", { fontSize: "12px", color: "#aacccc" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
 
   objs.push(bg, lineTop, title1, title2, lineBot, sub, btnBg, btnText, hint);
   this.tweens.add({ targets: [btnBg, btnText], alpha: { from: 0.6, to: 1 }, duration: 900, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
@@ -2191,10 +2233,9 @@ function showStartScreen() {
     objs.forEach((obj) => obj.destroy());
     this.physics.resume(); spawnTimer.paused = false; enemyHealthTimer.paused = false; enemySpawnGrowthTimer.paused = false;
     isChoosingWeapon = false; gameStartTime = this.time.now;
-
   };
 
-btnBg.on("pointerdown", startGame); btnText.on("pointerdown", startGame);
+  btnBg.on("pointerdown", startGame); btnText.on("pointerdown", startGame);
 }
 
 
