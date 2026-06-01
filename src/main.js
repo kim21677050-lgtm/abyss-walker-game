@@ -231,6 +231,7 @@ let gameStartTime = 0;
 let devMode = false;
 let devPanelEl = null;
 let gameSceneRef = null;
+let timerText = null;
 let devBtnEl = null;
 let lastMoveAngle = 0; // 마지막 이동 방향 저장
 let bgChunks = new Map(); // 청크 캐시
@@ -344,6 +345,12 @@ this.physics.add.overlap(player, expOrbs, (player, orb) => {
     color: "#ffffff",
   }).setScrollFactor(0).setDepth(1000);
 
+  timerText = this.add.text(this.scale.width / 2, 20, "00:00", {
+  fontSize: "22px",
+  color: "#ffffff",
+  fontStyle: "bold",
+}).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1000);
+
   expInfoText = this.add.text(this.scale.width - 20, 20, "", {
     fontSize: "15px",
     color: "#ffffff",
@@ -430,6 +437,13 @@ function update(time, delta) {
 
     this.physics.moveToObject(enemy, player, 95);
   });
+
+  if (!isDead) {
+  const elapsed = Math.floor((time - gameStartTime) / 1000);
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const ss = String(elapsed % 60).padStart(2, "0");
+  timerText.setText(`${mm}:${ss}`);
+}
 
   weaponManager.tick(time, delta);
   applyContactDamage.call(this, delta);
@@ -769,6 +783,9 @@ function layoutHud(scene, width = scene.scale.width, height = scene.scale.height
 
   levelText.setPosition(padding, padding);
   levelText.setFontSize(compact ? "18px" : "24px");
+
+  timerText.setPosition(width / 2, padding);
+timerText.setFontSize(compact ? "16px" : "22px");
 
   weaponText.setPosition(padding, compact ? padding + 34 : padding + 38);
   weaponText.setFontSize(compact ? "12px" : "16px");
