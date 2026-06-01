@@ -1807,6 +1807,21 @@ function damageEnemy(enemy, amount = 1) {
       enemy.destroy();
     });
     enemies.remove(enemy);  // 죽는 동안 중복 피해 방지
+     enemy.body.setVelocity(0, 0);
+    enemy.body.moves = false;
+
+    if (this.anims.exists("enemy_die") && enemy.play) {
+      enemy.play("enemy_die");
+      enemy.once("animationcomplete", () => {
+        showDeathBurst.call(this, enemy.x, enemy.y);
+        spawnExpOrb.call(this, enemy.x, enemy.y);
+        enemy.destroy();
+      });
+    } else {
+      showDeathBurst.call(this, enemy.x, enemy.y);
+      spawnExpOrb.call(this, enemy.x, enemy.y);
+      enemy.destroy();
+    }
     return;
   }
 
