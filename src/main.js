@@ -138,6 +138,527 @@ const playerVelocity = { x: 0, y: 0 };
 function preload() {
   for (let i = 1; i <= 6; i++) this.load.image(`player_${i}`, `assets/hero-run-${i}.png`);
   this.load.image("death-scythe", "assets/death-scythe.png");
+
+  this.load.spritesheet("enemy_walk", "assets/Skeleton_01_White_Walk.png", {
+    frameWidth: 96, frameHeight: 64
+  });
+  this.load.spritesheet("enemy_die", "assets/Skeleton_01_White_Die.png", {
+    frameWidth: 96, frameHeight: 64
+  });
+}
+
+class WeaponManager {
+  constructor(scene) {
+    this.scene = scene;
+    this.weapons = [];
+    this.maxWeapons = 5;
+    this.timeStopped = false;   // 영원불멸 중 무기 동작 여부
+    this.globalCastCount = 0;   // 무량무예 카운터
+  }
+
+  addOrUpgrade(type) {
+    const owned = this.getWeapon(type);
+    if (owned) { owned.upgrade(); return true; }
+    if (this.weapons.length >= this.maxWeapons) return false;
+    this.weapons.push(createWeapon(this.scene, type));
+    return true;
+  }
+
+  getWeapon(type) { return this.weapons.find((w) => w.type === type); }
+  getOwnedWeaponTypes() { return this.weapons.map((w) => w.type); }
+
+  tick(time, delta) {
+    // 영원불멸 중에도 무기는 발동 (플레이어만 움직임)
+    this.weapons.forEach((w) => w.tick(time, delta));
+  }
+
+  // 무량무예: 무기 시전 1회 카운트 후 보너스 시전 여부 반환
+  countCast(weaponTick) {
+    if (!pathManager?.hasSkill("warriorMu")) return false;
+    this.globalCastCount++;
+    if (this.globalCastCount % 10 === 0) {
+      // 보너스 2회 추가 시전
+      weaponTick(); weaponTick();
+    }
+  }
+}
+
+class AutoWeapon {
+  constructor(scene, type, cooldown) {
+    this.scene = scene; this.type = type; this.level = 1;
+    this.cooldown = cooldown; this.lastFire = 0;
+    this.definition = WEAPON_TYPES.find((w) => w.id === type);
+  }
+  upgrade() { this.level = Math.min(this.level + 1, 5); }
+  canFire(time, cooldown = this.cooldown) { return time > this.lastFire + cooldown; }
+
+  // 무기 발사 후 무량무예 카운트
+  notifyCast(time, delta) {
+    weaponManager.countCast(() => this.tick(time, delta));
+  }
+}
+
+// ── 이하 무기 클래스들은 원본과 동일 ────────────────────
+class MachineGunWeapon extends AutoWeapon {
+  constructor(scene) { super(scene, "machineGun", 180); this.shotCount = 0; this.lastDroneShot = 0; }
+  tick(time) {
+    if (this.canFire(time)) {
+      this.lastFire = time;
+      const count = this.level >= 2 ? 2 : 1;
+      for (let i = 0; i < count; i++) {
+        const target = findNearestEnemy();
+        if (!target) return;
+        const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+        const shotColor = this.level >= 3 && this.shotCount % 8 === 0 ? 0x99ff66 : 0xffff66;
+        const bullet = createTracerProjectile(this.scene, player.x + i * 10 - 5, player.y, angle, shotColor);
+        bullet.damage = getWeaponDamage(this.type, this.level);
+        bullet.explodeRadius = this.level >= 4 ? 55 : 0;
+        bullet.explodeDamage = getWeaponDamage(this.type, this.level) * 0.6;
+        this.shotCount++;
+        if (this.level >= 3 && this.shotCount % 8 === 0) { bullet.homing = true; bullet.target = target; bullet.speed = 650; }
+        showMuzzleFlash(this.scene, player.x, player.y, angle, 0xffffaa);
+        this.scene.physics.moveToObject(bullet, target, 650);
+      }
+      weaponManager.countCast(() => this.tick(time, 0));
+    }
+    if (this.level >= 5 && time > this.lastDroneShot + 650) {
+      this.lastDroneShot = time;
+      [-55, 55].forEach((offset) => {
+        const target = findNearestEnemy();
+        if (!target) return;
+        const angle = Phaser.Math.Angle.Between(player.x + offset, player.y - 30, target.x, target.y);
+        const bullet = createTracerProjectile(this.scene, player.x + offset, player.y - 30, angle, 0x99ff66);
+        bullet.damage = getWeaponDamage(this.type, this.level) * 0.75;
+        showMuzzleFlash(this.scene, player.x + offset, player.y - 30, angle, 0x99ff66);
+        this.scene.physics.moveToObject(bullet, target, 580);
+      });
+    }
+  }
+}
+
+class MagicMissileWeapon extends AutoWeapon {
+  constructor(scene) { super(scene, "magicMissile", 760); }
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+    const count = this.level >= 2 ? 2 : 1;
+    for (let i = 0; i < count; i++) {
+      const target = findNearestEnemy();
+      if (!target) return;
+      const bullet = createProjectile(this.scene, player.x, player.y, 0xbb88ff, 7);
+      const aura = this.scene.add.circle(player.x, player.y, 18, 0xbb88ff, 0.22).setDepth(32);
+      bullet.damage = getWeaponDamage(this.type, this.level);
+      bullet.homing = true; bullet.target = target; bullet.speed = 480;
+      bullet.pierce = this.level >= 3 ? 1 : 0;
+      bullet.explodeRadius = this.level >= 4 ? 70 : 0;
+      bullet.explodeDamage = getWeaponDamage(this.type, this.level) * 0.5;
+      bullet.splitOnHit = this.level >= 5;
+      bullet.trailColor = 0xd6a6ff; bullet.trailSize = 8;
+      this.scene.tweens.add({ targets: aura, alpha: 0, scale: 2.1, duration: 220, onComplete: () => aura.destroy() });
+      this.scene.physics.moveToObject(bullet, target, bullet.speed);
+    }
+    weaponManager.countCast(() => this.tick(time));
+  }
+}
+
+class LightningWeapon extends AutoWeapon {
+  constructor(scene) { super(scene, "lightning", 1100); this.lastStorm = 0; }
+  tick(time) {
+    if (this.canFire(time)) {
+      this.lastFire = time;
+      const targets = findEnemiesInRange(player.x, player.y, 650, this.level >= 2 ? 2 : 1);
+      targets.forEach((target) => this.strike(target, time));
+      if (this.level >= 3 && targets[0]) {
+        findEnemiesInRange(targets[0].x, targets[0].y, 280, 2).filter((e) => !targets.includes(e))
+          .forEach((target) => this.strike(target, time, getWeaponDamage(this.type, this.level) * 0.55));
+      }
+      weaponManager.countCast(() => this.tick(time));
+    }
+    if (this.level >= 5 && time > this.lastStorm + 2500) {
+      this.lastStorm = time;
+      findEnemiesInRange(player.x, player.y, 900, 5).forEach((target) =>
+        this.strike(target, time, getWeaponDamage(this.type, this.level) * 0.75));
+    }
+  }
+  strike(target, time, damage = getWeaponDamage("lightning", this.level)) {
+    showLightningStrike(this.scene, target.x, target.y, this.level >= 5);
+    if (this.level >= 4) { target.stunnedUntil = time + 700; target.setTint(0x99ddff); }
+    damageEnemy.call(this.scene, target, damage);
+  }
+}
+
+class SwordWeapon extends AutoWeapon {
+  constructor(scene) { super(scene, "sword", 850); this.rotationAngle = 0; this.lastSpinDamage = 0; }
+  tick(time, delta) {
+    if (this.canFire(time)) {
+      this.lastFire = time;
+      const swings = this.level >= 3 ? 2 : 1;
+      for (let i = 0; i < swings; i++) this.scene.time.delayedCall(i * 130, () => this.swing());
+      if (this.level >= 4) this.swordWave();
+      weaponManager.countCast(() => this.tick(time, delta));
+    }
+    if (this.level >= 5) {
+      this.rotationAngle += delta * 0.006;
+      const radius = 95;
+      const x = player.x + Math.cos(this.rotationAngle) * radius;
+      const y = player.y + Math.sin(this.rotationAngle) * radius;
+      const blade = this.scene.add.rectangle(x, y, 42, 10, 0xffd1dc, 0.85).setRotation(this.rotationAngle).setDepth(30);
+      this.scene.tweens.add({ targets: blade, alpha: 0, duration: 90, onComplete: () => blade.destroy() });
+      if (time > this.lastSpinDamage + 250) {
+        this.lastSpinDamage = time;
+        findEnemiesInRange(player.x, player.y, radius + 35, 4).forEach((enemy) =>
+          damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level) * 0.45));
+      }
+    }
+  }
+  swing() {
+    const range = this.level >= 2 ? 150 : 105;
+    const target = findNearestEnemy();
+    const angle = target ? Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y) : this.rotationAngle;
+    const arc = this.scene.add.arc(player.x, player.y, range, -65, 65, false, 0xffd1dc, 0.2)
+      .setAngle(Phaser.Math.RadToDeg(angle)).setStrokeStyle(8, 0xffffff, 0.55).setDepth(25);
+    const edge = this.scene.add.arc(player.x, player.y, range + 10, -55, 55, false, 0xffffff, 0)
+      .setAngle(Phaser.Math.RadToDeg(angle)).setStrokeStyle(3, 0xffd1dc, 0.9).setDepth(26);
+    this.scene.tweens.add({ targets: [arc, edge], alpha: 0, scale: 1.15, duration: 180, onComplete: () => { arc.destroy(); edge.destroy(); } });
+    findEnemiesInRange(player.x, player.y, range, 8).forEach((enemy) =>
+      damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level)));
+  }
+  swordWave() {
+    const target = findNearestEnemy();
+    if (!target) return;
+    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+    const wave = this.scene.add.arc(player.x, player.y, 90, -75, 75, false, 0xffd1dc, 0.25)
+      .setStrokeStyle(18, 0xffffff, 0.85).setRotation(angle).setScale(1.6, 1.1).setDepth(31);
+    this.scene.physics.add.existing(wave);
+    wave.body.setSize(160, 100);
+    bullets.add(wave);
+    wave.damage = getWeaponDamage(this.type, this.level) * 0.8;
+    wave.trailColor = 0xffd1dc; wave.trailSize = 28;
+    this.scene.physics.moveToObject(wave, target, 520);
+  }
+}
+
+class LaserWeapon extends AutoWeapon {
+  constructor(scene) { super(scene, "laser", 1250); this.spinAngle = 0; this.lastSpin = 0; }
+  tick(time, delta) {
+    if (this.canFire(time)) {
+      this.lastFire = time;
+      if (this.level >= 2) {
+        const targets = findEnemiesInRange(player.x, player.y, 900, 2);
+        if (targets.length === 0) return;
+        targets.forEach((t) => this.fireLaser(Phaser.Math.Angle.Between(player.x, player.y, t.x, t.y), 780, this.level >= 4));
+        if (targets.length === 1) this.fireLaser(Phaser.Math.Angle.Between(player.x, player.y, targets[0].x, targets[0].y) + 0.12, 780, this.level >= 4);
+      } else {
+        const target = findNearestEnemy();
+        if (!target) return;
+        this.fireLaser(Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y), 560, false);
+      }
+      weaponManager.countCast(() => this.tick(time, delta));
+    }
+    if (this.level >= 5 && time > this.lastSpin + 180) {
+      this.lastSpin = time;
+      this.spinAngle += delta * 0.006 + 0.22;
+      this.fireLaser(this.spinAngle, 700, true, getWeaponDamage(this.type, this.level) * 0.35);
+    }
+  }
+  fireLaser(angle, length, burn = false, damage = getWeaponDamage("laser", this.level)) {
+    const endX = player.x + Math.cos(angle) * length, endY = player.y + Math.sin(angle) * length;
+    showLaserBeam(this.scene, player.x, player.y, endX, endY, burn);
+    enemies.getChildren().forEach((enemy) => {
+      if (distanceToSegment(enemy.x, enemy.y, player.x, player.y, endX, endY) <= 28) {
+        if (burn) enemy.burnUntil = this.scene.time.now + 1200;
+        damageEnemy.call(this.scene, enemy, damage);
+      }
+    });
+  }
+}
+
+class SkullWeapon extends AutoWeapon {
+  constructor(scene) { super(scene, "skull", 5000); }
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+    const radius = this.level >= 3 ? 280 : 200;
+    const poisonDuration = this.level >= 2 ? 2500 : 1500;
+    const stunDuration = this.level >= 4 ? 1000 : 500;
+    this.showSkullEffect(radius);
+    findEnemiesInRange(player.x, player.y, radius).forEach((enemy) => {
+      enemy.stunnedUntil = time + stunDuration;
+      enemy.setFillStyle(0xcc99ff);
+      const stacks = this.level >= 5 ? 2 : 1;
+      enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, time + poisonDuration * stacks);
+      enemy.poisonDamage = getWeaponDamage(this.type, this.level) * 0.3;
+      enemy.nextPoisonTick = 0;
+      damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level));
+    });
+    weaponManager.countCast(() => this.tick(time));
+  }
+  showSkullEffect(radius) {
+    const ring = this.scene.add.circle(player.x, player.y, radius, 0xcc99ff, 0).setStrokeStyle(3, 0xcc99ff, 0.7).setDepth(50);
+    const fog = this.scene.add.circle(player.x, player.y, radius * 0.85, 0x220033, 0.18).setDepth(49);
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      const drop = this.scene.add.circle(player.x + Math.cos(angle) * radius * 0.5, player.y + Math.sin(angle) * radius * 0.5, 4, 0x99ff66, 0.8).setDepth(51);
+      this.scene.tweens.add({ targets: drop, x: player.x + Math.cos(angle) * radius, y: player.y + Math.sin(angle) * radius, alpha: 0, scale: 0.2, duration: 600, onComplete: () => drop.destroy() });
+    }
+    this.scene.tweens.add({ targets: [ring, fog], alpha: 0, scale: 1.15, duration: 700, ease: "Cubic.easeOut", onComplete: () => { ring.destroy(); fog.destroy(); } });
+  }
+}
+
+class LungWeapon extends AutoWeapon {
+  constructor(scene) { super(scene, "lung", 4000); }
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+    const count = this.level >= 3 ? 5 : 3;
+    const radius = this.level >= 2 ? 130 : 95;
+    const damage = getWeaponDamage(this.type, this.level);
+    for (let i = 0; i < count; i++) {
+      this.scene.time.delayedCall(i * 220, () => {
+        const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+        const dist = Phaser.Math.FloatBetween(40, 160);
+        const ex = player.x + Math.cos(angle) * dist, ey = player.y + Math.sin(angle) * dist;
+        explode.call(this.scene, ex, ey, radius, damage * (this.level >= 4 ? 1.4 : 1.0));
+        if (this.level >= 5) findEnemiesInRange(ex, ey, radius).forEach((enemy) => { enemy.burnUntil = Math.max(enemy.burnUntil || 0, this.scene.time.now + 1500); });
+        const smoke = this.scene.add.circle(ex, ey, radius * 0.6, 0xff6622, 0.15).setDepth(38);
+        this.scene.tweens.add({ targets: smoke, alpha: 0, scale: 1.6, y: smoke.y - 30, duration: 500, onComplete: () => smoke.destroy() });
+      });
+    }
+    weaponManager.countCast(() => this.tick(time));
+  }
+}
+
+class ScytheWeapon extends AutoWeapon {
+  constructor(scene) { super(scene, "scythe", 2000); this.swingAngle = 0; }
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+    const swings = this.level >= 3 ? 2 : 1;
+    for (let i = 0; i < swings; i++) this.scene.time.delayedCall(i * 280, () => this.swing(time));
+    if (this.level >= 5) this.scene.time.delayedCall(600, () => this.spawnWhirlwind());
+    weaponManager.countCast(() => this.tick(time));
+  }
+  swing(time) {
+    const range = 250, baseAngle = lastMoveAngle - Math.PI * 0.75;
+    const scythe = this.scene.add.image(player.x, player.y, "death-scythe")
+      .setDisplaySize(range * 2.2, range * 2.2).setDepth(29).setAlpha(1).setOrigin(0.15, 0.85).setRotation(baseAngle);
+    const startTime = this.scene.time.now, duration = 900, savedAngle = baseAngle;
+    let followTimer = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
+      if (!scythe.active) { followTimer.destroy(); return; }
+      scythe.setPosition(player.x, player.y);
+      const elapsed = this.scene.time.now - startTime, progress = Math.min(elapsed / duration, 1);
+      scythe.setRotation(savedAngle + Math.PI * 2 * progress);
+      if (progress >= 1) { followTimer.destroy(); this.scene.tweens.add({ targets: scythe, alpha: 0, duration: 150, onComplete: () => scythe.destroy() }); }
+    }});
+    const ring = this.scene.add.circle(player.x, player.y, range, 0xccffaa, 0).setStrokeStyle(3, 0xccffaa, 0.6).setDepth(27);
+    this.scene.tweens.add({ targets: ring, alpha: 0, scale: 1.15, duration: 400, ease: "Cubic.easeOut", onComplete: () => ring.destroy() });
+    findEnemiesInRange(player.x, player.y, range).forEach((e) => damageEnemy.call(this.scene, e, 11.0));
+    const hitEnemies = new Set(findEnemiesInRange(player.x, player.y, range));
+    findEnemiesInRange(player.x, player.y, 520, 5).filter((e) => !hitEnemies.has(e)).forEach((e, i) => {
+      this.scene.time.delayedCall(i * 70, () => {
+        if (!e.active || !e.body) return;
+        const g = this.scene.add.graphics().setDepth(48);
+        let elapsed = 0;
+        const pull = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
+          elapsed += 16;
+          if (!e.active || !e.body) { pull.destroy(); if (g.active) g.destroy(); return; }
+          g.clear();
+          g.lineStyle(1.5, 0xeeffdd, 0.85); g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
+          if (e.active && e.body) { const a = Phaser.Math.Angle.Between(e.x, e.y, player.x, player.y); e.body.setVelocity(Math.cos(a) * 220, Math.sin(a) * 220); }
+          if (elapsed >= 550) { pull.destroy(); if (g.active) g.destroy(); if (e.active) { damageEnemy.call(this.scene, e, 9.0); } }
+        }});
+      });
+    });
+  }
+  spawnWhirlwind() {
+    const duration = 1800, radius = 120;
+    let elapsed = 0, angle = 0;
+    const timer = this.scene.time.addEvent({ delay: 80, loop: true, callback: () => {
+      elapsed += 80; angle += 0.45;
+      const wx = player.x + Math.cos(angle) * 60, wy = player.y + Math.sin(angle) * 60;
+      const blade = this.scene.add.arc(wx, wy, 38, -90, 90, false, 0x88ffcc, 0.18).setAngle(Phaser.Math.RadToDeg(angle)).setStrokeStyle(4, 0xccffee, 0.7).setDepth(30);
+      this.scene.tweens.add({ targets: blade, alpha: 0, scale: 1.2, duration: 160, onComplete: () => blade.destroy() });
+      findEnemiesInRange(wx, wy, radius * 0.55, 4).forEach((enemy) => damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level) * 0.35));
+      if (elapsed >= duration) timer.destroy();
+    }});
+  }
+}
+
+class BlackHoleWeapon extends AutoWeapon {
+  constructor(scene) { super(scene, "blackHole", 5000); }
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+    const count = this.level >= 3 ? 2 : 1;
+    for (let i = 0; i < count; i++) this.scene.time.delayedCall(i * 400, () => this.spawnBlackHole(time));
+    weaponManager.countCast(() => this.tick(time));
+  }
+  spawnBlackHole(time) {
+    const target = findNearestEnemy();
+    const x = target ? target.x + Phaser.Math.FloatBetween(-60, 60) : player.x + Phaser.Math.FloatBetween(-200, 200);
+    const y = target ? target.y + Phaser.Math.FloatBetween(-60, 60) : player.y + Phaser.Math.FloatBetween(-200, 200);
+    const pullRadius = this.level >= 2 ? 280 : 200, duration = 2000, damage = getWeaponDamage(this.type, this.level);
+    const outerRing = this.scene.add.circle(x, y, pullRadius, 0x220033, 0).setStrokeStyle(2, 0xaa44ff, 0.35).setDepth(45);
+    const core = this.scene.add.circle(x, y, 18, 0x000000, 1).setStrokeStyle(4, 0xcc66ff, 0.9).setDepth(47);
+    const glow = this.scene.add.circle(x, y, 38, 0x6600cc, 0.22).setDepth(46);
+    this.scene.tweens.add({ targets: outerRing, scale: { from: 0.4, to: 1 }, alpha: { from: 0, to: 1 }, duration: 300, ease: "Back.easeOut" });
+    this.scene.tweens.add({ targets: core, scale: { from: 0.2, to: 1 }, duration: 300, ease: "Back.easeOut" });
+    const pullInterval = this.scene.time.addEvent({ delay: 80, loop: true, callback: () => {
+      enemies.getChildren().forEach((enemy) => {
+        if (!enemy.active) return;
+        const dist = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
+        if (dist > pullRadius) return;
+        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, x, y);
+        enemy.body.setVelocity(Math.cos(angle) * (this.level >= 4 ? 180 : 120), Math.sin(angle) * (this.level >= 4 ? 180 : 120));
+        if (this.level >= 4) enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, this.scene.time.now + 120);
+      });
+    }});
+    this.scene.time.delayedCall(duration, () => {
+      pullInterval.destroy();
+      explode.call(this.scene, x, y, this.level >= 2 ? 220 : 160, damage);
+      if (this.level >= 4) findEnemiesInRange(x, y, 220).forEach((e) => { e.stunnedUntil = this.scene.time.now + 800; e.setFillStyle(0x99ddff); });
+      if (this.level >= 5) for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; this.scene.time.delayedCall(i * 180, () => this.spawnMiniBlackHole(x + Math.cos(a) * 120, y + Math.sin(a) * 120, damage * 0.45)); }
+      outerRing.destroy(); core.destroy(); glow.destroy();
+    });
+    this.scene.tweens.add({ targets: glow, scale: { from: 1, to: 1.4 }, alpha: { from: 0.22, to: 0.1 }, duration: 500, yoyo: true, repeat: Math.floor(duration / 1000) });
+  }
+  spawnMiniBlackHole(x, y, damage) {
+    const radius = 110;
+    const miniCore = this.scene.add.circle(x, y, 10, 0x000000, 1).setStrokeStyle(3, 0xcc66ff, 0.8).setDepth(47);
+    const miniGlow = this.scene.add.circle(x, y, 22, 0x6600cc, 0.2).setDepth(46);
+    const pull = this.scene.time.addEvent({ delay: 80, loop: true, callback: () => {
+      enemies.getChildren().forEach((e) => {
+        if (!e.active) return;
+        if (Phaser.Math.Distance.Between(x, y, e.x, e.y) > radius) return;
+        const a = Phaser.Math.Angle.Between(e.x, e.y, x, y);
+        e.body.setVelocity(Math.cos(a) * 130, Math.sin(a) * 130);
+      });
+    }});
+    this.scene.time.delayedCall(1000, () => { pull.destroy(); explode.call(this.scene, x, y, radius, damage); miniCore.destroy(); miniGlow.destroy(); });
+  }
+}
+
+class BoomerangWeapon extends AutoWeapon {
+  constructor(scene) { super(scene, "boomerang", 1800); }
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+    const count = this.level >= 2 ? 2 : 1, trips = this.level >= 3 ? 2 : 1;
+    for (let i = 0; i < count; i++) this.scene.time.delayedCall(i * 180, () => this.throwBoomerang(trips, i));
+    if (this.level >= 5) [-1, 1].forEach((dir, idx) => this.scene.time.delayedCall(idx * 120, () => this.throwOrbitBoomerang(dir)));
+    weaponManager.countCast(() => this.tick(time));
+  }
+  throwBoomerang(trips, offset = 0) {
+    const target = findNearestEnemy();
+    if (!target) return;
+    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y) + (offset === 1 ? 0.18 : -0.09);
+    this.launchBoomerang(player.x, player.y, angle, this.level >= 4 ? 14 : 10, getWeaponDamage(this.type, this.level), 520, 500, trips);
+  }
+  launchBoomerang(startX, startY, angle, size, damage, speed, maxDist, tripsLeft) {
+    const color = 0x88ffdd;
+    const boomBody = this.scene.add.rectangle(startX, startY, size * 3, size * 0.7, color, 0.92).setDepth(32);
+    this.scene.physics.add.existing(boomBody);
+    boomBody.body.setSize(size * 3, size * 0.7);
+    boomBody.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+    let returning = false, hitEnemies = new Set(), distTraveled = 0, lastX = startX, lastY = startY;
+    const spinTween = this.scene.tweens.add({ targets: boomBody, rotation: { from: 0, to: Math.PI * 2 }, duration: 400, repeat: -1 });
+    const updateTimer = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
+      if (!boomBody.active) { updateTimer.destroy(); spinTween.stop(); return; }
+      distTraveled += Phaser.Math.Distance.Between(lastX, lastY, boomBody.x, boomBody.y);
+      lastX = boomBody.x; lastY = boomBody.y;
+      enemies.getChildren().forEach((enemy) => {
+        if (!enemy.active || hitEnemies.has(enemy)) return;
+        if (Phaser.Math.Distance.Between(boomBody.x, boomBody.y, enemy.x, enemy.y) < size * 1.8) { hitEnemies.add(enemy); damageEnemy.call(this.scene, enemy, damage); if (returning) hitEnemies.clear(); }
+      });
+      if (!returning && distTraveled >= maxDist) { returning = true; hitEnemies.clear(); }
+      if (returning) {
+        const retAngle = Phaser.Math.Angle.Between(boomBody.x, boomBody.y, player.x, player.y);
+        boomBody.body.setVelocity(Math.cos(retAngle) * speed * 1.1, Math.sin(retAngle) * speed * 1.1);
+        if (Phaser.Math.Distance.Between(boomBody.x, boomBody.y, player.x, player.y) < 30) {
+          updateTimer.destroy(); spinTween.stop(); boomBody.destroy();
+          if (tripsLeft > 1) { const ne = findNearestEnemy(); const na = Phaser.Math.Angle.Between(player.x, player.y, ne?.x ?? player.x + 1, ne?.y ?? player.y); this.launchBoomerang(player.x, player.y, na, size, damage, speed, maxDist, tripsLeft - 1); }
+        }
+      }
+    }});
+  }
+  throwOrbitBoomerang(dir) {
+    let orbitAngle = dir > 0 ? 0 : Math.PI, elapsed = 0;
+    const radius = 110, damage = getWeaponDamage(this.type, this.level) * 0.5, duration = 2200;
+    const hitCooldown = new Map();
+    const orb = this.scene.add.rectangle(player.x + Math.cos(orbitAngle) * radius, player.y + Math.sin(orbitAngle) * radius, 28, 8, 0x44ffcc, 0.88).setDepth(31);
+    const timer = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
+      elapsed += 16; orbitAngle += dir * 0.09;
+      const ox = player.x + Math.cos(orbitAngle) * radius, oy = player.y + Math.sin(orbitAngle) * radius;
+      orb.setPosition(ox, oy).setRotation(orbitAngle);
+      const trail = this.scene.add.circle(ox, oy, 4, 0x44ffcc, 0.3).setDepth(30);
+      this.scene.tweens.add({ targets: trail, alpha: 0, scale: 0.1, duration: 180, onComplete: () => trail.destroy() });
+      enemies.getChildren().forEach((enemy) => {
+        if (!enemy.active) return;
+        if (Phaser.Math.Distance.Between(ox, oy, enemy.x, enemy.y) < 30) { const last = hitCooldown.get(enemy) || 0; if (this.scene.time.now > last + 400) { hitCooldown.set(enemy, this.scene.time.now); damageEnemy.call(this.scene, enemy, damage); } }
+      });
+      if (elapsed >= duration) { timer.destroy(); orb.destroy(); }
+    }});
+  }
+}
+
+class ChainWeapon extends AutoWeapon {
+  constructor(scene) { super(scene, "chain", 2200); this.activeChains = []; }
+  tick(time) {
+    if (!this.canFire(time)) return;
+    this.lastFire = time;
+    this.clearChains();
+    const maxLinks = this.level >= 5 ? 5 : this.level >= 2 ? 3 : 2;
+    const targets = findEnemiesInRange(player.x, player.y, 700, maxLinks);
+    if (targets.length < 1) return;
+    const damage = getWeaponDamage(this.type, this.level), duration = 1800;
+    const chainObjs = [], allTargets = [{ x: player.x, y: player.y }, ...targets];
+    for (let i = 0; i < allTargets.length - 1; i++) chainObjs.push(this.drawChainLine(allTargets[i], allTargets[i + 1]));
+    this.activeChains.push(...chainObjs);
+    const hitCooldown = new Map(); let elapsed = 0;
+    const updateTimer = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
+      elapsed += 16;
+      chainObjs.forEach((obj, i) => {
+        if (!obj.active) return;
+        const from = i === 0 ? player : targets[i - 1], to = targets[i];
+        if (!from || !to || !to.active) { obj.destroy(); return; }
+        this.updateChainLine(obj, from, to);
+      });
+      targets.forEach((enemy) => {
+        if (!enemy.active || !enemy.body) return;
+        const last = hitCooldown.get(enemy) || 0;
+        if (this.scene.time.now > last + 300) {
+          hitCooldown.set(enemy, this.scene.time.now);
+          damageEnemy.call(this.scene, enemy, damage * 0.35);
+          if (this.level >= 3) targets.forEach((other) => { if (other !== enemy && other.active) damageEnemy.call(this.scene, other, damage * 0.15); });
+        }
+      });
+      if (this.level >= 4) targets.forEach((enemy) => {
+        if (!enemy.active) return;
+        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
+        enemy.body.setVelocity(enemy.body.velocity.x + Math.cos(angle) * 30, enemy.body.velocity.y + Math.sin(angle) * 30);
+      });
+      if (elapsed >= duration) {
+        updateTimer.destroy();
+        chainObjs.forEach((obj) => { if (obj.active) obj.destroy(); });
+        if (this.level >= 5) targets.forEach((enemy) => { if (enemy.active) explode.call(this.scene, enemy.x, enemy.y, 90, damage * 0.6); });
+      }
+    }});
+    weaponManager.countCast(() => this.tick(time));
+  }
+  drawChainLine(from, to) { const line = this.scene.add.graphics().setDepth(48); this.updateChainLine(line, from, to); return line; }
+  updateChainLine(graphics, from, to) {
+    graphics.clear();
+    const segments = 10, dx = to.x - from.x, dy = to.y - from.y, length = Math.sqrt(dx * dx + dy * dy);
+    if (length < 1) return;
+    const perpX = -dy / length, perpY = dx / length;
+    const points = [{ x: from.x, y: from.y }];
+    for (let i = 1; i < segments; i++) { const t = i / segments; points.push({ x: from.x + dx * t + perpX * Phaser.Math.FloatBetween(-22, 22), y: from.y + dy * t + perpY * Phaser.Math.FloatBetween(-22, 22) }); }
+    points.push({ x: to.x, y: to.y });
+    graphics.lineStyle(14, 0x4466ff, 0.08); graphics.beginPath(); graphics.moveTo(points[0].x, points[0].y); points.forEach((p) => graphics.lineTo(p.x, p.y)); graphics.strokePath();
+    graphics.lineStyle(1.8, 0xddeeff, 0.95); graphics.beginPath(); graphics.moveTo(points[0].x, points[0].y); points.forEach((p) => graphics.lineTo(p.x, p.y)); graphics.strokePath();
+    [from, to].forEach((pt) => { graphics.fillStyle(0xffffff, 0.9); graphics.fillCircle(pt.x, pt.y, 4.5); });
+  }
+  clearChains() { this.activeChains.forEach((obj) => { if (obj?.active) obj.destroy(); }); this.activeChains = []; }
 }
 
 function create() {
@@ -156,6 +677,19 @@ function create() {
   this.anims.create({ key: "walk", frames: [1,2,3,4,5,6].map(i=>({key:`player_${i}`})), frameRate: 10, repeat: -1 });
   this.anims.create({ key: "idle", frames: [{ key: "player_1" }], frameRate: 1, repeat: -1 });
   player.play("idle");
+
+  this.anims.create({
+    key: "enemy_walk",
+    frames: this.anims.generateFrameNumbers("enemy_walk", { start: 0, end: 9 }),
+    frameRate: 10,
+    repeat: -1
+  });
+  this.anims.create({
+    key: "enemy_die",
+    frames: this.anims.generateFrameNumbers("enemy_die", { start: 0, end: 12 }),
+    frameRate: 13,
+    repeat: 0
+  });
 
   playerHp = playerMaxHp;
   gameStartTime = this.time.now;
@@ -240,6 +774,8 @@ function update(time, delta) {
     if (enemy.fleeing) {
       const angle = Phaser.Math.Angle.Between(player.x, player.y, enemy.x, enemy.y);
       this.physics.velocityFromAngle(Phaser.Math.RadToDeg(angle), 130, enemy.body.velocity);
+      enemy.setFlipX(player.x > enemy.x);  // 도망칠 때도 방향 유지
+
       return;
     }
 
@@ -254,6 +790,7 @@ function update(time, delta) {
     }
 
     this.physics.moveToObject(enemy, player, 95);
+    enemy.setFlipX(player.x < enemy.x);
   });
 
   if (!isDead) {
@@ -483,7 +1020,8 @@ if (this.timeStopActive && time > this.timeStopUntil) {
         e.stunnedUntil = time + 500;
         e.slowed = false;
         this.gazeStacks.set(e, 0);
-        e.setFillStyle(0xff6644);
+        e.setTint(0xff6644);   // 스턴
+e.setTint(0xff9966);   // 둔화
         showGazeStun(this.scene, e.x, e.y);
       } else {
         e.slowed = true;
@@ -1045,10 +1583,18 @@ function movePlayer() {
   if (Math.abs(playerVelocity.x) > 30 || Math.abs(playerVelocity.y) > 30)
     lastMoveAngle = Math.atan2(playerVelocity.y, playerVelocity.x);
 
+  if (playerVelocity.x < -10) player.setFlipX(true);   // 왼쪽 이동 시 뒤집기
+  else if (playerVelocity.x > 10) player.setFlipX(false); // 오른쪽 이동 시 원래 방향
+
   const isMoving = Math.abs(playerVelocity.x) > 10 || Math.abs(playerVelocity.y) > 10;
   if (isMoving && player.anims.currentAnim?.key !== "walk") player.play("walk");
   else if (!isMoving && player.anims.currentAnim?.key !== "idle") player.play("idle");
 }
+
+  const isMoving = Math.abs(playerVelocity.x) > 10 || Math.abs(playerVelocity.y) > 10;
+  if (isMoving && player.anims.currentAnim?.key !== "walk") player.play("walk");
+  else if (!isMoving && player.anims.currentAnim?.key !== "idle") player.play("idle");
+
 
 function pullExpOrbs() {
   expOrbs.getChildren().forEach((orb) => {
@@ -1177,8 +1723,14 @@ function spawnEnemy() {
   const distance = 1200;
   const x = player.x + Math.cos(angle) * distance;
   const y = player.y + Math.sin(angle) * distance;
-  const enemy = this.add.circle(x, y, 20, 0xff3355);
-  this.physics.add.existing(enemy);
+  const enemy = this.physics.add.sprite(x, y, "enemy_walk");
+  enemy.setDisplaySize(64, 64);  // 게임 내 표시 크기
+  enemy.play("enemy_walk");
+
+  if (player.x < enemy.x) {
+  enemy.setFlipX(true);  // 플레이어가 왼쪽에 있으면 뒤집기
+}
+
   enemy.maxHp = enemyMaxHp; enemy.hp = enemy.maxHp;
   enemy.burnUntil = 0; enemy.stunnedUntil = 0;
   enemies.add(enemy);
@@ -1237,17 +1789,31 @@ function handleBulletHit(bullet, enemy) {
 function damageEnemy(enemy, amount = 1) {
   if (!enemy || !enemy.active) return;
   enemy.hp -= amount;
-  enemy.setFillStyle(enemy.stunnedUntil > this.time.now ? 0x99ddff : 0xff3355);
+
+  // setFillStyle → setTint로 교체
+  enemy.setTint(enemy.stunnedUntil > this.time.now ? 0x99ddff : 0xff3355);
+
   showHitFlash.call(this, enemy.x, enemy.y);
 
   // 만상무예 카운트
   if (pathManager) pathManager.countAttack();
 
   if (enemy.hp <= 0) {
-    showDeathBurst.call(this, enemy.x, enemy.y);
-    spawnExpOrb.call(this, enemy.x, enemy.y);
-    enemy.destroy();
+    // 죽기 애니메이션 재생 후 제거
+    enemy.play("enemy_die");
+    enemy.once("animationcomplete", () => {
+      showDeathBurst.call(this, enemy.x, enemy.y);
+      spawnExpOrb.call(this, enemy.x, enemy.y);
+      enemy.destroy();
+    });
+    enemies.remove(enemy);  // 죽는 동안 중복 피해 방지
+    return;
   }
+
+  // 피격 후 tint 복구
+  this.time.delayedCall(120, () => {
+    if (enemy.active) enemy.clearTint();
+  });
 }
 
 function spawnExpOrb(x, y) {
@@ -1302,7 +1868,7 @@ function updateProjectiles(time) {
     if (enemy.poisonUntil > time && (!enemy.nextPoisonTick || time > enemy.nextPoisonTick)) {
       enemy.nextPoisonTick = time + 400;
       damageEnemy.call(this, enemy, enemy.poisonDamage || 0.4);
-      if (enemy.active) enemy.setFillStyle(0x99ff66);
+      if (enemy.active) enemy.setTint(0x99ff66);
     }
   });
 }
@@ -1446,522 +2012,7 @@ function distanceToSegment(px, py, x1, y1, x2, y2) {
   return Phaser.Math.Distance.Between(px, py, x1 + t * dx, y1 + t * dy);
 }
 
-// ═══════════════════════════════════════════════════════
-// 무기 매니저
-// ═══════════════════════════════════════════════════════
-class WeaponManager {
-  constructor(scene) {
-    this.scene = scene;
-    this.weapons = [];
-    this.maxWeapons = 5;
-    this.timeStopped = false;   // 영원불멸 중 무기 동작 여부
-    this.globalCastCount = 0;   // 무량무예 카운터
-  }
 
-  addOrUpgrade(type) {
-    const owned = this.getWeapon(type);
-    if (owned) { owned.upgrade(); return true; }
-    if (this.weapons.length >= this.maxWeapons) return false;
-    this.weapons.push(createWeapon(this.scene, type));
-    return true;
-  }
-
-  getWeapon(type) { return this.weapons.find((w) => w.type === type); }
-  getOwnedWeaponTypes() { return this.weapons.map((w) => w.type); }
-
-  tick(time, delta) {
-    // 영원불멸 중에도 무기는 발동 (플레이어만 움직임)
-    this.weapons.forEach((w) => w.tick(time, delta));
-  }
-
-  // 무량무예: 무기 시전 1회 카운트 후 보너스 시전 여부 반환
-  countCast(weaponTick) {
-    if (!pathManager?.hasSkill("warriorMu")) return false;
-    this.globalCastCount++;
-    if (this.globalCastCount % 10 === 0) {
-      // 보너스 2회 추가 시전
-      weaponTick(); weaponTick();
-    }
-  }
-}
-
-class AutoWeapon {
-  constructor(scene, type, cooldown) {
-    this.scene = scene; this.type = type; this.level = 1;
-    this.cooldown = cooldown; this.lastFire = 0;
-    this.definition = WEAPON_TYPES.find((w) => w.id === type);
-  }
-  upgrade() { this.level = Math.min(this.level + 1, 5); }
-  canFire(time, cooldown = this.cooldown) { return time > this.lastFire + cooldown; }
-
-  // 무기 발사 후 무량무예 카운트
-  notifyCast(time, delta) {
-    weaponManager.countCast(() => this.tick(time, delta));
-  }
-}
-
-// ── 이하 무기 클래스들은 원본과 동일 ────────────────────
-class MachineGunWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "machineGun", 180); this.shotCount = 0; this.lastDroneShot = 0; }
-  tick(time) {
-    if (this.canFire(time)) {
-      this.lastFire = time;
-      const count = this.level >= 2 ? 2 : 1;
-      for (let i = 0; i < count; i++) {
-        const target = findNearestEnemy();
-        if (!target) return;
-        const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
-        const shotColor = this.level >= 3 && this.shotCount % 8 === 0 ? 0x99ff66 : 0xffff66;
-        const bullet = createTracerProjectile(this.scene, player.x + i * 10 - 5, player.y, angle, shotColor);
-        bullet.damage = getWeaponDamage(this.type, this.level);
-        bullet.explodeRadius = this.level >= 4 ? 55 : 0;
-        bullet.explodeDamage = getWeaponDamage(this.type, this.level) * 0.6;
-        this.shotCount++;
-        if (this.level >= 3 && this.shotCount % 8 === 0) { bullet.homing = true; bullet.target = target; bullet.speed = 650; }
-        showMuzzleFlash(this.scene, player.x, player.y, angle, 0xffffaa);
-        this.scene.physics.moveToObject(bullet, target, 650);
-      }
-      weaponManager.countCast(() => this.tick(time, 0));
-    }
-    if (this.level >= 5 && time > this.lastDroneShot + 650) {
-      this.lastDroneShot = time;
-      [-55, 55].forEach((offset) => {
-        const target = findNearestEnemy();
-        if (!target) return;
-        const angle = Phaser.Math.Angle.Between(player.x + offset, player.y - 30, target.x, target.y);
-        const bullet = createTracerProjectile(this.scene, player.x + offset, player.y - 30, angle, 0x99ff66);
-        bullet.damage = getWeaponDamage(this.type, this.level) * 0.75;
-        showMuzzleFlash(this.scene, player.x + offset, player.y - 30, angle, 0x99ff66);
-        this.scene.physics.moveToObject(bullet, target, 580);
-      });
-    }
-  }
-}
-
-class MagicMissileWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "magicMissile", 760); }
-  tick(time) {
-    if (!this.canFire(time)) return;
-    this.lastFire = time;
-    const count = this.level >= 2 ? 2 : 1;
-    for (let i = 0; i < count; i++) {
-      const target = findNearestEnemy();
-      if (!target) return;
-      const bullet = createProjectile(this.scene, player.x, player.y, 0xbb88ff, 7);
-      const aura = this.scene.add.circle(player.x, player.y, 18, 0xbb88ff, 0.22).setDepth(32);
-      bullet.damage = getWeaponDamage(this.type, this.level);
-      bullet.homing = true; bullet.target = target; bullet.speed = 480;
-      bullet.pierce = this.level >= 3 ? 1 : 0;
-      bullet.explodeRadius = this.level >= 4 ? 70 : 0;
-      bullet.explodeDamage = getWeaponDamage(this.type, this.level) * 0.5;
-      bullet.splitOnHit = this.level >= 5;
-      bullet.trailColor = 0xd6a6ff; bullet.trailSize = 8;
-      this.scene.tweens.add({ targets: aura, alpha: 0, scale: 2.1, duration: 220, onComplete: () => aura.destroy() });
-      this.scene.physics.moveToObject(bullet, target, bullet.speed);
-    }
-    weaponManager.countCast(() => this.tick(time));
-  }
-}
-
-class LightningWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "lightning", 1100); this.lastStorm = 0; }
-  tick(time) {
-    if (this.canFire(time)) {
-      this.lastFire = time;
-      const targets = findEnemiesInRange(player.x, player.y, 650, this.level >= 2 ? 2 : 1);
-      targets.forEach((target) => this.strike(target, time));
-      if (this.level >= 3 && targets[0]) {
-        findEnemiesInRange(targets[0].x, targets[0].y, 280, 2).filter((e) => !targets.includes(e))
-          .forEach((target) => this.strike(target, time, getWeaponDamage(this.type, this.level) * 0.55));
-      }
-      weaponManager.countCast(() => this.tick(time));
-    }
-    if (this.level >= 5 && time > this.lastStorm + 2500) {
-      this.lastStorm = time;
-      findEnemiesInRange(player.x, player.y, 900, 5).forEach((target) =>
-        this.strike(target, time, getWeaponDamage(this.type, this.level) * 0.75));
-    }
-  }
-  strike(target, time, damage = getWeaponDamage("lightning", this.level)) {
-    showLightningStrike(this.scene, target.x, target.y, this.level >= 5);
-    if (this.level >= 4) { target.stunnedUntil = time + 700; target.setFillStyle(0x99ddff); }
-    damageEnemy.call(this.scene, target, damage);
-  }
-}
-
-class SwordWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "sword", 850); this.rotationAngle = 0; this.lastSpinDamage = 0; }
-  tick(time, delta) {
-    if (this.canFire(time)) {
-      this.lastFire = time;
-      const swings = this.level >= 3 ? 2 : 1;
-      for (let i = 0; i < swings; i++) this.scene.time.delayedCall(i * 130, () => this.swing());
-      if (this.level >= 4) this.swordWave();
-      weaponManager.countCast(() => this.tick(time, delta));
-    }
-    if (this.level >= 5) {
-      this.rotationAngle += delta * 0.006;
-      const radius = 95;
-      const x = player.x + Math.cos(this.rotationAngle) * radius;
-      const y = player.y + Math.sin(this.rotationAngle) * radius;
-      const blade = this.scene.add.rectangle(x, y, 42, 10, 0xffd1dc, 0.85).setRotation(this.rotationAngle).setDepth(30);
-      this.scene.tweens.add({ targets: blade, alpha: 0, duration: 90, onComplete: () => blade.destroy() });
-      if (time > this.lastSpinDamage + 250) {
-        this.lastSpinDamage = time;
-        findEnemiesInRange(player.x, player.y, radius + 35, 4).forEach((enemy) =>
-          damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level) * 0.45));
-      }
-    }
-  }
-  swing() {
-    const range = this.level >= 2 ? 150 : 105;
-    const target = findNearestEnemy();
-    const angle = target ? Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y) : this.rotationAngle;
-    const arc = this.scene.add.arc(player.x, player.y, range, -65, 65, false, 0xffd1dc, 0.2)
-      .setAngle(Phaser.Math.RadToDeg(angle)).setStrokeStyle(8, 0xffffff, 0.55).setDepth(25);
-    const edge = this.scene.add.arc(player.x, player.y, range + 10, -55, 55, false, 0xffffff, 0)
-      .setAngle(Phaser.Math.RadToDeg(angle)).setStrokeStyle(3, 0xffd1dc, 0.9).setDepth(26);
-    this.scene.tweens.add({ targets: [arc, edge], alpha: 0, scale: 1.15, duration: 180, onComplete: () => { arc.destroy(); edge.destroy(); } });
-    findEnemiesInRange(player.x, player.y, range, 8).forEach((enemy) =>
-      damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level)));
-  }
-  swordWave() {
-    const target = findNearestEnemy();
-    if (!target) return;
-    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
-    const wave = this.scene.add.arc(player.x, player.y, 90, -75, 75, false, 0xffd1dc, 0.25)
-      .setStrokeStyle(18, 0xffffff, 0.85).setRotation(angle).setScale(1.6, 1.1).setDepth(31);
-    this.scene.physics.add.existing(wave);
-    wave.body.setSize(160, 100);
-    bullets.add(wave);
-    wave.damage = getWeaponDamage(this.type, this.level) * 0.8;
-    wave.trailColor = 0xffd1dc; wave.trailSize = 28;
-    this.scene.physics.moveToObject(wave, target, 520);
-  }
-}
-
-class LaserWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "laser", 1250); this.spinAngle = 0; this.lastSpin = 0; }
-  tick(time, delta) {
-    if (this.canFire(time)) {
-      this.lastFire = time;
-      if (this.level >= 2) {
-        const targets = findEnemiesInRange(player.x, player.y, 900, 2);
-        if (targets.length === 0) return;
-        targets.forEach((t) => this.fireLaser(Phaser.Math.Angle.Between(player.x, player.y, t.x, t.y), 780, this.level >= 4));
-        if (targets.length === 1) this.fireLaser(Phaser.Math.Angle.Between(player.x, player.y, targets[0].x, targets[0].y) + 0.12, 780, this.level >= 4);
-      } else {
-        const target = findNearestEnemy();
-        if (!target) return;
-        this.fireLaser(Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y), 560, false);
-      }
-      weaponManager.countCast(() => this.tick(time, delta));
-    }
-    if (this.level >= 5 && time > this.lastSpin + 180) {
-      this.lastSpin = time;
-      this.spinAngle += delta * 0.006 + 0.22;
-      this.fireLaser(this.spinAngle, 700, true, getWeaponDamage(this.type, this.level) * 0.35);
-    }
-  }
-  fireLaser(angle, length, burn = false, damage = getWeaponDamage("laser", this.level)) {
-    const endX = player.x + Math.cos(angle) * length, endY = player.y + Math.sin(angle) * length;
-    showLaserBeam(this.scene, player.x, player.y, endX, endY, burn);
-    enemies.getChildren().forEach((enemy) => {
-      if (distanceToSegment(enemy.x, enemy.y, player.x, player.y, endX, endY) <= 28) {
-        if (burn) enemy.burnUntil = this.scene.time.now + 1200;
-        damageEnemy.call(this.scene, enemy, damage);
-      }
-    });
-  }
-}
-
-class SkullWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "skull", 5000); }
-  tick(time) {
-    if (!this.canFire(time)) return;
-    this.lastFire = time;
-    const radius = this.level >= 3 ? 280 : 200;
-    const poisonDuration = this.level >= 2 ? 2500 : 1500;
-    const stunDuration = this.level >= 4 ? 1000 : 500;
-    this.showSkullEffect(radius);
-    findEnemiesInRange(player.x, player.y, radius).forEach((enemy) => {
-      enemy.stunnedUntil = time + stunDuration;
-      enemy.setFillStyle(0xcc99ff);
-      const stacks = this.level >= 5 ? 2 : 1;
-      enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, time + poisonDuration * stacks);
-      enemy.poisonDamage = getWeaponDamage(this.type, this.level) * 0.3;
-      enemy.nextPoisonTick = 0;
-      damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level));
-    });
-    weaponManager.countCast(() => this.tick(time));
-  }
-  showSkullEffect(radius) {
-    const ring = this.scene.add.circle(player.x, player.y, radius, 0xcc99ff, 0).setStrokeStyle(3, 0xcc99ff, 0.7).setDepth(50);
-    const fog = this.scene.add.circle(player.x, player.y, radius * 0.85, 0x220033, 0.18).setDepth(49);
-    for (let i = 0; i < 12; i++) {
-      const angle = (i / 12) * Math.PI * 2;
-      const drop = this.scene.add.circle(player.x + Math.cos(angle) * radius * 0.5, player.y + Math.sin(angle) * radius * 0.5, 4, 0x99ff66, 0.8).setDepth(51);
-      this.scene.tweens.add({ targets: drop, x: player.x + Math.cos(angle) * radius, y: player.y + Math.sin(angle) * radius, alpha: 0, scale: 0.2, duration: 600, onComplete: () => drop.destroy() });
-    }
-    this.scene.tweens.add({ targets: [ring, fog], alpha: 0, scale: 1.15, duration: 700, ease: "Cubic.easeOut", onComplete: () => { ring.destroy(); fog.destroy(); } });
-  }
-}
-
-class LungWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "lung", 4000); }
-  tick(time) {
-    if (!this.canFire(time)) return;
-    this.lastFire = time;
-    const count = this.level >= 3 ? 5 : 3;
-    const radius = this.level >= 2 ? 130 : 95;
-    const damage = getWeaponDamage(this.type, this.level);
-    for (let i = 0; i < count; i++) {
-      this.scene.time.delayedCall(i * 220, () => {
-        const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
-        const dist = Phaser.Math.FloatBetween(40, 160);
-        const ex = player.x + Math.cos(angle) * dist, ey = player.y + Math.sin(angle) * dist;
-        explode.call(this.scene, ex, ey, radius, damage * (this.level >= 4 ? 1.4 : 1.0));
-        if (this.level >= 5) findEnemiesInRange(ex, ey, radius).forEach((enemy) => { enemy.burnUntil = Math.max(enemy.burnUntil || 0, this.scene.time.now + 1500); });
-        const smoke = this.scene.add.circle(ex, ey, radius * 0.6, 0xff6622, 0.15).setDepth(38);
-        this.scene.tweens.add({ targets: smoke, alpha: 0, scale: 1.6, y: smoke.y - 30, duration: 500, onComplete: () => smoke.destroy() });
-      });
-    }
-    weaponManager.countCast(() => this.tick(time));
-  }
-}
-
-class ScytheWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "scythe", 2000); this.swingAngle = 0; }
-  tick(time) {
-    if (!this.canFire(time)) return;
-    this.lastFire = time;
-    const swings = this.level >= 3 ? 2 : 1;
-    for (let i = 0; i < swings; i++) this.scene.time.delayedCall(i * 280, () => this.swing(time));
-    if (this.level >= 5) this.scene.time.delayedCall(600, () => this.spawnWhirlwind());
-    weaponManager.countCast(() => this.tick(time));
-  }
-  swing(time) {
-    const range = 250, baseAngle = lastMoveAngle - Math.PI * 0.75;
-    const scythe = this.scene.add.image(player.x, player.y, "death-scythe")
-      .setDisplaySize(range * 2.2, range * 2.2).setDepth(29).setAlpha(1).setOrigin(0.15, 0.85).setRotation(baseAngle);
-    const startTime = this.scene.time.now, duration = 900, savedAngle = baseAngle;
-    let followTimer = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
-      if (!scythe.active) { followTimer.destroy(); return; }
-      scythe.setPosition(player.x, player.y);
-      const elapsed = this.scene.time.now - startTime, progress = Math.min(elapsed / duration, 1);
-      scythe.setRotation(savedAngle + Math.PI * 2 * progress);
-      if (progress >= 1) { followTimer.destroy(); this.scene.tweens.add({ targets: scythe, alpha: 0, duration: 150, onComplete: () => scythe.destroy() }); }
-    }});
-    const ring = this.scene.add.circle(player.x, player.y, range, 0xccffaa, 0).setStrokeStyle(3, 0xccffaa, 0.6).setDepth(27);
-    this.scene.tweens.add({ targets: ring, alpha: 0, scale: 1.15, duration: 400, ease: "Cubic.easeOut", onComplete: () => ring.destroy() });
-    findEnemiesInRange(player.x, player.y, range).forEach((e) => damageEnemy.call(this.scene, e, 11.0));
-    const hitEnemies = new Set(findEnemiesInRange(player.x, player.y, range));
-    findEnemiesInRange(player.x, player.y, 520, 5).filter((e) => !hitEnemies.has(e)).forEach((e, i) => {
-      this.scene.time.delayedCall(i * 70, () => {
-        if (!e.active || !e.body) return;
-        const g = this.scene.add.graphics().setDepth(48);
-        let elapsed = 0;
-        const pull = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
-          elapsed += 16;
-          if (!e.active || !e.body) { pull.destroy(); if (g.active) g.destroy(); return; }
-          g.clear();
-          g.lineStyle(1.5, 0xeeffdd, 0.85); g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
-          if (e.active && e.body) { const a = Phaser.Math.Angle.Between(e.x, e.y, player.x, player.y); e.body.setVelocity(Math.cos(a) * 220, Math.sin(a) * 220); }
-          if (elapsed >= 550) { pull.destroy(); if (g.active) g.destroy(); if (e.active) { damageEnemy.call(this.scene, e, 9.0); } }
-        }});
-      });
-    });
-  }
-  spawnWhirlwind() {
-    const duration = 1800, radius = 120;
-    let elapsed = 0, angle = 0;
-    const timer = this.scene.time.addEvent({ delay: 80, loop: true, callback: () => {
-      elapsed += 80; angle += 0.45;
-      const wx = player.x + Math.cos(angle) * 60, wy = player.y + Math.sin(angle) * 60;
-      const blade = this.scene.add.arc(wx, wy, 38, -90, 90, false, 0x88ffcc, 0.18).setAngle(Phaser.Math.RadToDeg(angle)).setStrokeStyle(4, 0xccffee, 0.7).setDepth(30);
-      this.scene.tweens.add({ targets: blade, alpha: 0, scale: 1.2, duration: 160, onComplete: () => blade.destroy() });
-      findEnemiesInRange(wx, wy, radius * 0.55, 4).forEach((enemy) => damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level) * 0.35));
-      if (elapsed >= duration) timer.destroy();
-    }});
-  }
-}
-
-class BlackHoleWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "blackHole", 5000); }
-  tick(time) {
-    if (!this.canFire(time)) return;
-    this.lastFire = time;
-    const count = this.level >= 3 ? 2 : 1;
-    for (let i = 0; i < count; i++) this.scene.time.delayedCall(i * 400, () => this.spawnBlackHole(time));
-    weaponManager.countCast(() => this.tick(time));
-  }
-  spawnBlackHole(time) {
-    const target = findNearestEnemy();
-    const x = target ? target.x + Phaser.Math.FloatBetween(-60, 60) : player.x + Phaser.Math.FloatBetween(-200, 200);
-    const y = target ? target.y + Phaser.Math.FloatBetween(-60, 60) : player.y + Phaser.Math.FloatBetween(-200, 200);
-    const pullRadius = this.level >= 2 ? 280 : 200, duration = 2000, damage = getWeaponDamage(this.type, this.level);
-    const outerRing = this.scene.add.circle(x, y, pullRadius, 0x220033, 0).setStrokeStyle(2, 0xaa44ff, 0.35).setDepth(45);
-    const core = this.scene.add.circle(x, y, 18, 0x000000, 1).setStrokeStyle(4, 0xcc66ff, 0.9).setDepth(47);
-    const glow = this.scene.add.circle(x, y, 38, 0x6600cc, 0.22).setDepth(46);
-    this.scene.tweens.add({ targets: outerRing, scale: { from: 0.4, to: 1 }, alpha: { from: 0, to: 1 }, duration: 300, ease: "Back.easeOut" });
-    this.scene.tweens.add({ targets: core, scale: { from: 0.2, to: 1 }, duration: 300, ease: "Back.easeOut" });
-    const pullInterval = this.scene.time.addEvent({ delay: 80, loop: true, callback: () => {
-      enemies.getChildren().forEach((enemy) => {
-        if (!enemy.active) return;
-        const dist = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
-        if (dist > pullRadius) return;
-        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, x, y);
-        enemy.body.setVelocity(Math.cos(angle) * (this.level >= 4 ? 180 : 120), Math.sin(angle) * (this.level >= 4 ? 180 : 120));
-        if (this.level >= 4) enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, this.scene.time.now + 120);
-      });
-    }});
-    this.scene.time.delayedCall(duration, () => {
-      pullInterval.destroy();
-      explode.call(this.scene, x, y, this.level >= 2 ? 220 : 160, damage);
-      if (this.level >= 4) findEnemiesInRange(x, y, 220).forEach((e) => { e.stunnedUntil = this.scene.time.now + 800; e.setFillStyle(0x99ddff); });
-      if (this.level >= 5) for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; this.scene.time.delayedCall(i * 180, () => this.spawnMiniBlackHole(x + Math.cos(a) * 120, y + Math.sin(a) * 120, damage * 0.45)); }
-      outerRing.destroy(); core.destroy(); glow.destroy();
-    });
-    this.scene.tweens.add({ targets: glow, scale: { from: 1, to: 1.4 }, alpha: { from: 0.22, to: 0.1 }, duration: 500, yoyo: true, repeat: Math.floor(duration / 1000) });
-  }
-  spawnMiniBlackHole(x, y, damage) {
-    const radius = 110;
-    const miniCore = this.scene.add.circle(x, y, 10, 0x000000, 1).setStrokeStyle(3, 0xcc66ff, 0.8).setDepth(47);
-    const miniGlow = this.scene.add.circle(x, y, 22, 0x6600cc, 0.2).setDepth(46);
-    const pull = this.scene.time.addEvent({ delay: 80, loop: true, callback: () => {
-      enemies.getChildren().forEach((e) => {
-        if (!e.active) return;
-        if (Phaser.Math.Distance.Between(x, y, e.x, e.y) > radius) return;
-        const a = Phaser.Math.Angle.Between(e.x, e.y, x, y);
-        e.body.setVelocity(Math.cos(a) * 130, Math.sin(a) * 130);
-      });
-    }});
-    this.scene.time.delayedCall(1000, () => { pull.destroy(); explode.call(this.scene, x, y, radius, damage); miniCore.destroy(); miniGlow.destroy(); });
-  }
-}
-
-class BoomerangWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "boomerang", 1800); }
-  tick(time) {
-    if (!this.canFire(time)) return;
-    this.lastFire = time;
-    const count = this.level >= 2 ? 2 : 1, trips = this.level >= 3 ? 2 : 1;
-    for (let i = 0; i < count; i++) this.scene.time.delayedCall(i * 180, () => this.throwBoomerang(trips, i));
-    if (this.level >= 5) [-1, 1].forEach((dir, idx) => this.scene.time.delayedCall(idx * 120, () => this.throwOrbitBoomerang(dir)));
-    weaponManager.countCast(() => this.tick(time));
-  }
-  throwBoomerang(trips, offset = 0) {
-    const target = findNearestEnemy();
-    if (!target) return;
-    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y) + (offset === 1 ? 0.18 : -0.09);
-    this.launchBoomerang(player.x, player.y, angle, this.level >= 4 ? 14 : 10, getWeaponDamage(this.type, this.level), 520, 500, trips);
-  }
-  launchBoomerang(startX, startY, angle, size, damage, speed, maxDist, tripsLeft) {
-    const color = 0x88ffdd;
-    const boomBody = this.scene.add.rectangle(startX, startY, size * 3, size * 0.7, color, 0.92).setDepth(32);
-    this.scene.physics.add.existing(boomBody);
-    boomBody.body.setSize(size * 3, size * 0.7);
-    boomBody.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
-    let returning = false, hitEnemies = new Set(), distTraveled = 0, lastX = startX, lastY = startY;
-    const spinTween = this.scene.tweens.add({ targets: boomBody, rotation: { from: 0, to: Math.PI * 2 }, duration: 400, repeat: -1 });
-    const updateTimer = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
-      if (!boomBody.active) { updateTimer.destroy(); spinTween.stop(); return; }
-      distTraveled += Phaser.Math.Distance.Between(lastX, lastY, boomBody.x, boomBody.y);
-      lastX = boomBody.x; lastY = boomBody.y;
-      enemies.getChildren().forEach((enemy) => {
-        if (!enemy.active || hitEnemies.has(enemy)) return;
-        if (Phaser.Math.Distance.Between(boomBody.x, boomBody.y, enemy.x, enemy.y) < size * 1.8) { hitEnemies.add(enemy); damageEnemy.call(this.scene, enemy, damage); if (returning) hitEnemies.clear(); }
-      });
-      if (!returning && distTraveled >= maxDist) { returning = true; hitEnemies.clear(); }
-      if (returning) {
-        const retAngle = Phaser.Math.Angle.Between(boomBody.x, boomBody.y, player.x, player.y);
-        boomBody.body.setVelocity(Math.cos(retAngle) * speed * 1.1, Math.sin(retAngle) * speed * 1.1);
-        if (Phaser.Math.Distance.Between(boomBody.x, boomBody.y, player.x, player.y) < 30) {
-          updateTimer.destroy(); spinTween.stop(); boomBody.destroy();
-          if (tripsLeft > 1) { const ne = findNearestEnemy(); const na = Phaser.Math.Angle.Between(player.x, player.y, ne?.x ?? player.x + 1, ne?.y ?? player.y); this.launchBoomerang(player.x, player.y, na, size, damage, speed, maxDist, tripsLeft - 1); }
-        }
-      }
-    }});
-  }
-  throwOrbitBoomerang(dir) {
-    let orbitAngle = dir > 0 ? 0 : Math.PI, elapsed = 0;
-    const radius = 110, damage = getWeaponDamage(this.type, this.level) * 0.5, duration = 2200;
-    const hitCooldown = new Map();
-    const orb = this.scene.add.rectangle(player.x + Math.cos(orbitAngle) * radius, player.y + Math.sin(orbitAngle) * radius, 28, 8, 0x44ffcc, 0.88).setDepth(31);
-    const timer = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
-      elapsed += 16; orbitAngle += dir * 0.09;
-      const ox = player.x + Math.cos(orbitAngle) * radius, oy = player.y + Math.sin(orbitAngle) * radius;
-      orb.setPosition(ox, oy).setRotation(orbitAngle);
-      const trail = this.scene.add.circle(ox, oy, 4, 0x44ffcc, 0.3).setDepth(30);
-      this.scene.tweens.add({ targets: trail, alpha: 0, scale: 0.1, duration: 180, onComplete: () => trail.destroy() });
-      enemies.getChildren().forEach((enemy) => {
-        if (!enemy.active) return;
-        if (Phaser.Math.Distance.Between(ox, oy, enemy.x, enemy.y) < 30) { const last = hitCooldown.get(enemy) || 0; if (this.scene.time.now > last + 400) { hitCooldown.set(enemy, this.scene.time.now); damageEnemy.call(this.scene, enemy, damage); } }
-      });
-      if (elapsed >= duration) { timer.destroy(); orb.destroy(); }
-    }});
-  }
-}
-
-class ChainWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "chain", 2200); this.activeChains = []; }
-  tick(time) {
-    if (!this.canFire(time)) return;
-    this.lastFire = time;
-    this.clearChains();
-    const maxLinks = this.level >= 5 ? 5 : this.level >= 2 ? 3 : 2;
-    const targets = findEnemiesInRange(player.x, player.y, 700, maxLinks);
-    if (targets.length < 1) return;
-    const damage = getWeaponDamage(this.type, this.level), duration = 1800;
-    const chainObjs = [], allTargets = [{ x: player.x, y: player.y }, ...targets];
-    for (let i = 0; i < allTargets.length - 1; i++) chainObjs.push(this.drawChainLine(allTargets[i], allTargets[i + 1]));
-    this.activeChains.push(...chainObjs);
-    const hitCooldown = new Map(); let elapsed = 0;
-    const updateTimer = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
-      elapsed += 16;
-      chainObjs.forEach((obj, i) => {
-        if (!obj.active) return;
-        const from = i === 0 ? player : targets[i - 1], to = targets[i];
-        if (!from || !to || !to.active) { obj.destroy(); return; }
-        this.updateChainLine(obj, from, to);
-      });
-      targets.forEach((enemy) => {
-        if (!enemy.active || !enemy.body) return;
-        const last = hitCooldown.get(enemy) || 0;
-        if (this.scene.time.now > last + 300) {
-          hitCooldown.set(enemy, this.scene.time.now);
-          damageEnemy.call(this.scene, enemy, damage * 0.35);
-          if (this.level >= 3) targets.forEach((other) => { if (other !== enemy && other.active) damageEnemy.call(this.scene, other, damage * 0.15); });
-        }
-      });
-      if (this.level >= 4) targets.forEach((enemy) => {
-        if (!enemy.active) return;
-        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
-        enemy.body.setVelocity(enemy.body.velocity.x + Math.cos(angle) * 30, enemy.body.velocity.y + Math.sin(angle) * 30);
-      });
-      if (elapsed >= duration) {
-        updateTimer.destroy();
-        chainObjs.forEach((obj) => { if (obj.active) obj.destroy(); });
-        if (this.level >= 5) targets.forEach((enemy) => { if (enemy.active) explode.call(this.scene, enemy.x, enemy.y, 90, damage * 0.6); });
-      }
-    }});
-    weaponManager.countCast(() => this.tick(time));
-  }
-  drawChainLine(from, to) { const line = this.scene.add.graphics().setDepth(48); this.updateChainLine(line, from, to); return line; }
-  updateChainLine(graphics, from, to) {
-    graphics.clear();
-    const segments = 10, dx = to.x - from.x, dy = to.y - from.y, length = Math.sqrt(dx * dx + dy * dy);
-    if (length < 1) return;
-    const perpX = -dy / length, perpY = dx / length;
-    const points = [{ x: from.x, y: from.y }];
-    for (let i = 1; i < segments; i++) { const t = i / segments; points.push({ x: from.x + dx * t + perpX * Phaser.Math.FloatBetween(-22, 22), y: from.y + dy * t + perpY * Phaser.Math.FloatBetween(-22, 22) }); }
-    points.push({ x: to.x, y: to.y });
-    graphics.lineStyle(14, 0x4466ff, 0.08); graphics.beginPath(); graphics.moveTo(points[0].x, points[0].y); points.forEach((p) => graphics.lineTo(p.x, p.y)); graphics.strokePath();
-    graphics.lineStyle(1.8, 0xddeeff, 0.95); graphics.beginPath(); graphics.moveTo(points[0].x, points[0].y); points.forEach((p) => graphics.lineTo(p.x, p.y)); graphics.strokePath();
-    [from, to].forEach((pt) => { graphics.fillStyle(0xffffff, 0.9); graphics.fillCircle(pt.x, pt.y, 4.5); });
-  }
-  clearChains() { this.activeChains.forEach((obj) => { if (obj?.active) obj.destroy(); }); this.activeChains = []; }
-}
 
 function createWeapon(scene, type) {
   switch (type) {
