@@ -1,5 +1,7 @@
 import Phaser from "phaser";
 
+const MAX_ENEMIES = 250; // 최대 적 수
+
 const WEAPON_TYPES = [
   {
     id: "machineGun",
@@ -317,19 +319,20 @@ enemySpawnGrowthTimer = this.time.addEvent({
 
   this.physics.add.overlap(bullets, enemies, handleBulletHit, null, this);
 
-  this.physics.add.overlap(player, expOrbs, (player, orb) => {
-    orb.destroy();
-    exp++;
+  // 수정
+this.physics.add.overlap(player, expOrbs, (player, orb) => {
+  orb.destroy();
+  exp++;
 
-    if (exp >= expToNextLevel) {
-       if (devMode) return;
-      level++;
-      exp = 0;
-      expToNextLevel += Math.floor(expToNextLevel * 0.2 + 0.2);
-      showLevelUpText.call(this);
-      showWeaponSelection.call(this);
-    }
-  });
+  if (exp >= expToNextLevel && !isChoosingWeapon) {
+    if (devMode) return;
+    level++;
+    exp = 0;
+    expToNextLevel += Math.floor(expToNextLevel * 0.2 + 0.2);
+    showLevelUpText.call(this);
+    showWeaponSelection.call(this);
+  }
+});
 
   this.cameras.main.startFollow(player, true, 0.08, 0.08);
   this.cameras.main.setZoom(1.05);
@@ -671,8 +674,8 @@ function showWeaponSelection() {
       .setOrigin(0.5).setScrollFactor(0).setDepth(2001 + index)
       .setInteractive({ useHandCursor: true });
 
-    hitZone.on("pointerdown", () => selectOption(weaponType));
-    hitZone.on("pointerup", () => selectOption(weaponType));
+    // 수정
+hitZone.on("pointerup", () => selectOption(weaponType));
     hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
     hitZone.on("pointerout", () => card.getByName("bg").setStrokeStyle(2, weaponType.color));
     overlay.add([card, hitZone]);
@@ -805,6 +808,7 @@ chain:     [1.8, 2.3, 2.8, 3.4, 4.2],
 // ─── 적 스폰 ──────────────────────────────────────────────
 
 function spawnEnemy() {
+  if (enemies.getLength() >= MAX_ENEMIES) return;
   const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
   const distance = 1200;
   const x = player.x + Math.cos(angle) * distance;
@@ -819,10 +823,17 @@ function spawnEnemy() {
   enemies.add(enemy);
 }
 
+// 수정
 function spawnEnemyWave() {
+  const current = enemies.getLength();
+  if (current >= MAX_ENEMIES) return;
+
   enemySpawnRemainder += 1 + enemySpawnBonus;
-  const spawnCount = Math.floor(enemySpawnRemainder);
-  enemySpawnRemainder -= spawnCount;
+  const spawnCount = Math.min(
+    Math.floor(enemySpawnRemainder),
+    MAX_ENEMIES - current
+  );
+  enemySpawnRemainder -= Math.floor(enemySpawnRemainder);
 
   for (let i = 0; i < spawnCount; i++) {
     spawnEnemy.call(this);
@@ -2253,6 +2264,7 @@ function showDevPanel() {
 
   const panel = document.createElement("div");
   panel.id = "dev-panel";
+  // 수정
   panel.style.cssText = `
     position: fixed;
     top: 50%;
@@ -2267,6 +2279,8 @@ function showDevPanel() {
     font-family: monospace;
     min-width: 320px;
     box-shadow: 0 0 30px rgba(0,255,213,0.15);
+    max-height: 85vh;
+    overflow-y: auto;
   `;
 
   const title = document.createElement("div");
@@ -2365,6 +2379,103 @@ function showDevPanel() {
   slotRow.appendChild(slotLabel);
   slotRow.appendChild(slotSelect);
   panel.appendChild(slotRow);
+
+  // ── 시간 조작 섹션 ──────────────────────────────────────
+  const timeTitle = document.createElement("div");
+  timeTitle.textContent = "⏱ 시간 조작";
+  timeTitle.style.cssText = "color: #00ffd5; font-size: 13px; font-weight: bold; letter-spacing: 2px; margin-top: 16px; border-top: 1px solid #223; padding-top: 12px; margin-bottom: 10px;";
+  panel.appendChild(timeTitle);
+
+  // 현재 시간 표시
+  const timeDisplay = document.createElement("div");
+  const currentMin = Math.floor(elapsedSeconds / 60);
+  const currentSec = elapsedSeconds % 60;
+  timeDisplay.textContent = `현재 경과: ${currentMin}분 ${currentSec}초 / 적 체력+${enemyMaxHp - 3} / 스폰보너스 ${enemySpawnBonus.toFixed(1)}`;
+  timeDisplay.style.cssText = "font-size: 11px; color: #556; margin-bottom: 10px;";
+  panel.appendChild(timeDisplay);
+
+  // 시간 슬라이더
+  const timeRow = document.createElement("div");
+  timeRow.style.cssText = "display: flex; align-items: center; gap: 10px; margin-bottom: 8px;";
+
+  const timeLabel = document.createElement("span");
+  timeLabel.textContent = "경과 시간";
+  timeLabel.style.cssText = "width: 100px; font-size: 13px; color: #b7f7ff; flex-shrink: 0;";
+
+  const timeSlider = document.createElement("input");
+  timeSlider.type = "range";
+  timeSlider.min = "0";
+  timeSlider.max = "6000"; // 최대 100분
+  timeSlider.value = String(elapsedSeconds);
+  timeSlider.style.cssText = "flex: 1;";
+
+  const timeVal = document.createElement("span");
+  timeVal.style.cssText = "font-size: 12px; color: #b7f7ff; min-width: 52px; text-align: right;";
+  const fmt = (s) => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
+  timeVal.textContent = fmt(elapsedSeconds);
+
+  timeSlider.addEventListener("input", () => {
+    timeVal.textContent = fmt(Number(timeSlider.value));
+  });
+
+  timeRow.appendChild(timeLabel);
+  timeRow.appendChild(timeSlider);
+  timeRow.appendChild(timeVal);
+  panel.appendChild(timeRow);
+
+  // 적용 버튼
+  const applyTimeBtn = document.createElement("button");
+  applyTimeBtn.textContent = "시간 적용";
+  applyTimeBtn.style.cssText = `
+    width: 100%;
+    background: transparent;
+    border: 1px solid #00ffd5;
+    color: #00ffd5;
+    padding: 5px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 12px;
+    letter-spacing: 2px;
+    margin-bottom: 6px;
+  `;
+
+  applyTimeBtn.addEventListener("click", () => {
+    const targetSec = Number(timeSlider.value);
+
+    // elapsedSeconds 동기화
+    elapsedSeconds = targetSec;
+
+    // 적 체력 재계산 (10초마다 +growthRate씩 올랐던 것 역산)
+    // increaseEnemyMaxHp 는 45초마다 +5 → targetSec/45 * 5
+    const hpTicks = Math.floor(targetSec / 45);
+    enemyMaxHp = 3 + hpTicks * 5;
+
+    // enemySpawnBonus 재계산
+    // increaseEnemySpawnAmount 는 10초마다 호출, growthRate = 0.12 + elapsed*0.004
+    let bonus = 0;
+    for (let t = 10; t <= targetSec; t += 10) {
+      bonus += 0.12 + t * 0.004;
+    }
+    enemySpawnBonus = bonus;
+
+    // 스폰 딜레이 재계산
+    spawnTimer.delay = Math.max(120, 250 - targetSec * 1.2);
+
+    // 기존 적들 체력도 새 enemyMaxHp 에 맞게 갱신
+    enemies.getChildren().forEach((enemy) => {
+      if (!enemy.active) return;
+      enemy.maxHp = enemyMaxHp;
+      enemy.hp = enemyMaxHp;
+    });
+
+    // 표시 갱신
+    timeDisplay.textContent = `현재 경과: ${Math.floor(targetSec/60)}분 ${targetSec%60}초 / 적 체력+${enemyMaxHp - 3} / 스폰보너스 ${enemySpawnBonus.toFixed(1)}`;
+
+    showDevNotice(`⏱ ${fmt(targetSec)} 으로 이동`, "#00ffd5");
+  });
+
+  panel.appendChild(applyTimeBtn);
 
    // 퓨전 무기 섹션
   const fusionTitle = document.createElement("div");
@@ -3125,9 +3236,9 @@ function showFusionSelection(availableFusions) {
 
     hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
     hitZone.on("pointerout", () => card.getByName("bg").setStrokeStyle(2, recipe.color));
-    hitZone.on("pointerdown", () => {
-      if (didSelect) return;
-      didSelect = true;
+    hitZone.on("pointerup", () => {
+  if (didSelect) return;
+  didSelect = true;
 
       // 재료 제거 후 전설 무기 추가
       recipe.requires.forEach((req) => weaponManager.removeWeapon(req));
@@ -4456,6 +4567,7 @@ class DeathScytheWeapon extends FusionWeapon {
     }
   }
 
+  // 수정
   swing(time) {
     const target = findNearestEnemy();
     const range = 250;
@@ -4464,14 +4576,12 @@ class DeathScytheWeapon extends FusionWeapon {
       : this.swingAngle;
     this.swingAngle = baseAngle;
 
-    // 낫 이펙트
     const arc = this.scene.add.arc(player.x, player.y, range, -80, 80, false, 0xccffaa, 0.15)
       .setAngle(Phaser.Math.RadToDeg(baseAngle)).setStrokeStyle(13, 0xccffaa, 0.88).setDepth(29);
     const edge = this.scene.add.arc(player.x, player.y, range + 16, -72, 72, false, 0xffffff, 0)
       .setAngle(Phaser.Math.RadToDeg(baseAngle)).setStrokeStyle(3, 0xeeffdd, 0.95).setDepth(30);
     this.scene.tweens.add({ targets: [arc, edge], alpha: 0, scale: 1.1, duration: 270, ease: "Cubic.easeOut", onComplete: () => { arc.destroy(); edge.destroy(); } });
 
-    // 낫 피해 (관통, 대낫 Lv4)
     const hitEnemies = new Set();
     findEnemiesInRange(player.x, player.y, range).forEach((e) => {
       const ea = Phaser.Math.Angle.Between(player.x, player.y, e.x, e.y);
@@ -4482,34 +4592,40 @@ class DeathScytheWeapon extends FusionWeapon {
       }
     });
 
-    // 사슬 끌어당기기 (고유 능력 — 낫 범위 밖 적까지)
     const chainTargets = findEnemiesInRange(player.x, player.y, 520, 5)
       .filter((e) => !hitEnemies.has(e));
 
     chainTargets.forEach((e, i) => {
       this.scene.time.delayedCall(i * 70, () => {
-        if (!e.active) return;
-        // 사슬 시각
+        if (!e.active || !e.body) return; // ← 가드 추가
         const g = this.scene.add.graphics().setDepth(48);
         let elapsed = 0;
         const pull = this.scene.time.addEvent({
           delay: 16, loop: true,
           callback: () => {
             elapsed += 16;
-            if (!e.active) { pull.destroy(); g.destroy(); return; }
+            if (!e.active || !e.body) { // ← 가드 추가
+              pull.destroy();
+              if (g.active) g.destroy();
+              return;
+            }
             g.clear();
             g.lineStyle(6, 0xccffaa, 0.12); g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
             g.lineStyle(1.5, 0xeeffdd, 0.85); g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
             const a = Phaser.Math.Angle.Between(e.x, e.y, player.x, player.y);
-            e.body.setVelocity(Math.cos(a) * 220, Math.sin(a) * 220);
+            if (e.active && e.body) { // ← setVelocity 직전 재확인
+              e.body.setVelocity(Math.cos(a) * 220, Math.sin(a) * 220);
+            }
             if (elapsed >= 550) {
-              pull.destroy(); g.destroy();
+              pull.destroy();
+              if (g.active) g.destroy();
               if (e.active) {
                 damageEnemy.call(this.scene, e, 9.0);
-                // 낫 추가 베기 (고유 능력)
-                const slashArc = this.scene.add.arc(e.x, e.y, 70, -100, 100, false, 0xccffaa, 0.2)
-                  .setStrokeStyle(7, 0xccffaa, 0.7).setDepth(28);
-                this.scene.tweens.add({ targets: slashArc, alpha: 0, scale: 1.2, duration: 200, onComplete: () => slashArc.destroy() });
+                if (e.active) { // ← damageEnemy 후 재확인
+                  const slashArc = this.scene.add.arc(e.x, e.y, 70, -100, 100, false, 0xccffaa, 0.2)
+                    .setStrokeStyle(7, 0xccffaa, 0.7).setDepth(28);
+                  this.scene.tweens.add({ targets: slashArc, alpha: 0, scale: 1.2, duration: 200, onComplete: () => slashArc.destroy() });
+                }
               }
             }
           },
@@ -4545,13 +4661,15 @@ class DeathScytheWeapon extends FusionWeapon {
         });
 
         targets.forEach((e) => {
-          if (!e.active) return;
+          if (!e.active || !e.body) return;
           const last = hitCD.get(e) || 0;
           if (this.scene.time.now > last + 280) {
             hitCD.set(e, this.scene.time.now);
             targets.forEach((other) => { if (other.active) damageEnemy.call(this.scene, other, 3.5); });
-            const a = Phaser.Math.Angle.Between(e.x, e.y, player.x, player.y);
-            e.body.setVelocity(e.body.velocity.x + Math.cos(a) * 35, e.body.velocity.y + Math.sin(a) * 35);
+            if (e.active && e.body) {
+              const a = Phaser.Math.Angle.Between(e.x, e.y, player.x, player.y);
+              e.body.setVelocity(e.body.velocity.x + Math.cos(a) * 35, e.body.velocity.y + Math.sin(a) * 35);
+            }
           }
         });
 
