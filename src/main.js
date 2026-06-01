@@ -423,7 +423,7 @@ function update(time, delta) {
       return;
     }
 
-    this.physics.moveToObject(enemy, player, 150);
+    this.physics.moveToObject(enemy, player, 95);
   });
 
   weaponManager.tick(time, delta);
@@ -526,29 +526,41 @@ function resetJoystick() {
 
 // ─── 플레이어 이동 ────────────────────────────────────────
 
+// 수정
 function movePlayer() {
-  const acceleration = 40;
   const maxSpeed = 350;
 
-  if (cursors.left.isDown) playerVelocity.x -= acceleration;
-  if (cursors.right.isDown) playerVelocity.x += acceleration;
-  if (cursors.up.isDown) playerVelocity.y -= acceleration;
-  if (cursors.down.isDown) playerVelocity.y += acceleration;
+  let dx = 0;
+  let dy = 0;
 
-  playerVelocity.x *= 0.9;
-  playerVelocity.y *= 0.9;
+  if (cursors.left.isDown) dx -= 1;
+  if (cursors.right.isDown) dx += 1;
+  if (cursors.up.isDown) dy -= 1;
+  if (cursors.down.isDown) dy += 1;
 
-  // 조이스틱 입력 반영
   if (joystick?.active) {
-    playerVelocity.x += joystick.vector.x * acceleration * 1.55;
-    playerVelocity.y += joystick.vector.y * acceleration * 1.55;
+    dx += joystick.vector.x;
+    dy += joystick.vector.y;
   }
 
-  playerVelocity.x = Phaser.Math.Clamp(playerVelocity.x, -maxSpeed, maxSpeed);
-  playerVelocity.y = Phaser.Math.Clamp(playerVelocity.y, -maxSpeed, maxSpeed);
+  // 대각선 이동 속도 정규화
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len > 1) { dx /= len; dy /= len; }
+
+  if (dx !== 0 || dy !== 0) {
+    playerVelocity.x = dx * maxSpeed;
+    playerVelocity.y = dy * maxSpeed;
+  } else {
+    // 입력 없을 때만 빠르게 감속
+    playerVelocity.x *= 0.7;
+    playerVelocity.y *= 0.7;
+    if (Math.abs(playerVelocity.x) < 5) playerVelocity.x = 0;
+    if (Math.abs(playerVelocity.y) < 5) playerVelocity.y = 0;
+  }
+
   player.body.setVelocity(playerVelocity.x, playerVelocity.y);
 
-   const isMoving = Math.abs(playerVelocity.x) > 10 || Math.abs(playerVelocity.y) > 10;
+  const isMoving = Math.abs(playerVelocity.x) > 10 || Math.abs(playerVelocity.y) > 10;
   if (isMoving && player.anims.currentAnim?.key !== "walk") {
     player.play("walk");
   } else if (!isMoving && player.anims.currentAnim?.key !== "idle") {
