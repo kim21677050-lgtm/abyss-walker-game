@@ -245,6 +245,7 @@ function preload() {
   for (let i = 1; i <= 6; i++) {
     this.load.image(`player_${i}`, `assets/hero-run-${i}.png`);
   }
+  this.load.image("death-scythe", "assets/death-scythe.png"); // ← 추가
 }
 
 function create() {
@@ -4576,44 +4577,86 @@ class DeathScytheWeapon extends FusionWeapon {
       : this.swingAngle;
     this.swingAngle = baseAngle;
 
-    const arc = this.scene.add.arc(player.x, player.y, range, -80, 80, false, 0xccffaa, 0.15)
-      .setAngle(Phaser.Math.RadToDeg(baseAngle)).setStrokeStyle(13, 0xccffaa, 0.88).setDepth(29);
-    const edge = this.scene.add.arc(player.x, player.y, range + 16, -72, 72, false, 0xffffff, 0)
-      .setAngle(Phaser.Math.RadToDeg(baseAngle)).setStrokeStyle(3, 0xeeffdd, 0.95).setDepth(30);
-    this.scene.tweens.add({ targets: [arc, edge], alpha: 0, scale: 1.1, duration: 270, ease: "Cubic.easeOut", onComplete: () => { arc.destroy(); edge.destroy(); } });
+    // ── 낫 이미지 스핀 이펙트 ──────────────────────────────
+    const scythe = this.scene.add.image(player.x, player.y, "death-scythe")
+      .setDisplaySize(range * 2.2, range * 2.2)
+      .setDepth(29)
+      .setAlpha(0.92)
+      .setOrigin(0.5, 0.5);
 
-    const hitEnemies = new Set();
-    findEnemiesInRange(player.x, player.y, range).forEach((e) => {
-      const ea = Phaser.Math.Angle.Between(player.x, player.y, e.x, e.y);
-      const diff = Phaser.Math.Angle.Wrap(ea - baseAngle);
-      if (Math.abs(diff) <= 1.4) {
-        hitEnemies.add(e);
-        damageEnemy.call(this.scene, e, 11.0);
-      }
+    // 잔상 3개
+    for (let i = 1; i <= 3; i++) {
+      const ghost = this.scene.add.image(player.x, player.y, "death-scythe")
+        .setDisplaySize(range * 2.2, range * 2.2)
+        .setDepth(28)
+        .setAlpha(0.18 * (4 - i))
+        .setOrigin(0.5, 0.5)
+        .setTint(0xccffaa);
+
+      this.scene.tweens.add({
+        targets: ghost,
+        rotation: baseAngle + Math.PI * 2,
+        alpha: 0,
+        duration: 520 + i * 80,
+        ease: "Cubic.easeOut",
+        onComplete: () => ghost.destroy(),
+      });
+    }
+
+    // 메인 낫 360도 회전
+    this.scene.tweens.add({
+      targets: scythe,
+      rotation: baseAngle + Math.PI * 2,
+      alpha: 0,
+      duration: 520,
+      ease: "Cubic.easeOut",
+      onComplete: () => scythe.destroy(),
     });
 
+    // 외곽 링 이펙트
+    const ring = this.scene.add.circle(player.x, player.y, range, 0xccffaa, 0)
+      .setStrokeStyle(3, 0xccffaa, 0.6)
+      .setDepth(27);
+    this.scene.tweens.add({
+      targets: ring,
+      alpha: 0,
+      scale: 1.15,
+      duration: 400,
+      ease: "Cubic.easeOut",
+      onComplete: () => ring.destroy(),
+    });
+
+    // 히트 판정 — 360도 전방위
+    findEnemiesInRange(player.x, player.y, range).forEach((e) => {
+      damageEnemy.call(this.scene, e, 11.0);
+    });
+
+    // 체인 끌어당기기 (범위 밖 적)
+    const hitEnemies = new Set(findEnemiesInRange(player.x, player.y, range));
     const chainTargets = findEnemiesInRange(player.x, player.y, 520, 5)
       .filter((e) => !hitEnemies.has(e));
 
     chainTargets.forEach((e, i) => {
       this.scene.time.delayedCall(i * 70, () => {
-        if (!e.active || !e.body) return; // ← 가드 추가
+        if (!e.active || !e.body) return;
         const g = this.scene.add.graphics().setDepth(48);
         let elapsed = 0;
         const pull = this.scene.time.addEvent({
           delay: 16, loop: true,
           callback: () => {
             elapsed += 16;
-            if (!e.active || !e.body) { // ← 가드 추가
+            if (!e.active || !e.body) {
               pull.destroy();
               if (g.active) g.destroy();
               return;
             }
             g.clear();
-            g.lineStyle(6, 0xccffaa, 0.12); g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
-            g.lineStyle(1.5, 0xeeffdd, 0.85); g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
-            const a = Phaser.Math.Angle.Between(e.x, e.y, player.x, player.y);
-            if (e.active && e.body) { // ← setVelocity 직전 재확인
+            g.lineStyle(6, 0xccffaa, 0.12);
+            g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
+            g.lineStyle(1.5, 0xeeffdd, 0.85);
+            g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
+            if (e.active && e.body) {
+              const a = Phaser.Math.Angle.Between(e.x, e.y, player.x, player.y);
               e.body.setVelocity(Math.cos(a) * 220, Math.sin(a) * 220);
             }
             if (elapsed >= 550) {
@@ -4621,10 +4664,13 @@ class DeathScytheWeapon extends FusionWeapon {
               if (g.active) g.destroy();
               if (e.active) {
                 damageEnemy.call(this.scene, e, 9.0);
-                if (e.active) { // ← damageEnemy 후 재확인
+                if (e.active) {
                   const slashArc = this.scene.add.arc(e.x, e.y, 70, -100, 100, false, 0xccffaa, 0.2)
                     .setStrokeStyle(7, 0xccffaa, 0.7).setDepth(28);
-                  this.scene.tweens.add({ targets: slashArc, alpha: 0, scale: 1.2, duration: 200, onComplete: () => slashArc.destroy() });
+                  this.scene.tweens.add({
+                    targets: slashArc, alpha: 0, scale: 1.2, duration: 200,
+                    onComplete: () => slashArc.destroy(),
+                  });
                 }
               }
             }
