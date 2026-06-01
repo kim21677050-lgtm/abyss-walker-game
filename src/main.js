@@ -1146,47 +1146,92 @@ function showPathSelection() {
   const scene = gameSceneRef;
   const W = scene.scale.width, H = scene.scale.height;
   const cx = W / 2, cy = H / 2;
+  const isPortrait = H > W;
 
   const overlay = scene.add.container(0, 0).setScrollFactor(0).setDepth(3000);
   const shade = scene.add.rectangle(0, 0, W, H, 0x000000, 0.88).setOrigin(0);
 
-  const titleGlow = scene.add.text(cx, cy - 220, "── 길을 선택하라 ──", {
-    fontSize: "32px", color: "#ffffff", fontStyle: "bold", letterSpacing: 8,
+  const titleGlow = scene.add.text(cx, isPortrait ? 28 : cy - 220, "── 길을 선택하라 ──", {
+    fontSize: isPortrait ? "20px" : "32px", color: "#ffffff", fontStyle: "bold", letterSpacing: 8,
   }).setOrigin(0.5);
 
-  const sub = scene.add.text(cx, cy - 176, "한번 선택한 길은 이 생애에서 바꿀 수 없다", {
-    fontSize: "14px", color: "#889988", letterSpacing: 2,
+  const sub = scene.add.text(cx, isPortrait ? 58 : cy - 176, "한번 선택한 길은 이 생애에서 바꿀 수 없다", {
+    fontSize: isPortrait ? "11px" : "14px", color: "#889988", letterSpacing: 2,
   }).setOrigin(0.5);
 
   overlay.add([shade, titleGlow, sub]);
 
   const paths = Object.values(PATH_TYPES);
-  const cardW = Math.min(200, (W - 80) / 3);
-  const spacing = cardW + 20;
-  const startX = cx - spacing;
 
-  paths.forEach((path, i) => {
-    const x = startX + i * spacing;
-    const card = createPathCard.call(scene, x, cy + 20, path);
-    overlay.add(card);
+  if (isPortrait) {
+    // 세로: 카드 3개를 세로로 나열, 화면 높이에 맞게 스케일
+    const availH = H - 100; // 타이틀 영역 제외
+    const cardBaseH = 320;
+    const cardBaseW = 200;
+    const gap = 8;
+    const totalNeeded = cardBaseH * 3 + gap * 2;
+    const scaleH = availH / totalNeeded;
+    const scaleW = (W - 32) / cardBaseW;
+    const cardScale = Math.min(scaleH, scaleW, 1.0);
 
-    const hitZone = scene.add.zone(x, cy + 20, cardW, 340)
-      .setOrigin(0.5).setScrollFactor(0).setDepth(3010)
-      .setInteractive({ useHandCursor: true });
+    const scaledH = cardBaseH * cardScale;
+    const startY = 80 + scaledH / 2;
 
-    hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
-    hitZone.on("pointerout",  () => card.getByName("bg").setStrokeStyle(2, path.color));
-    hitZone.on("pointerup",   () => {
-      overlay.destroy(true);
-      pathManager.chosenPath = path.id;
-      showPathChosenEffect.call(scene, path);
-      resumeGameplay.call(scene);
-      // 16레벨 선택지에서 확정 스킬 지급 플래그
-      pathManager.guaranteeNextSkill = true;
+    paths.forEach((path, i) => {
+      const x = cx;
+      const y = startY + i * (scaledH + gap);
+      const card = createPathCard.call(scene, x, y, path);
+      card.setScale(cardScale);
+      overlay.add(card);
+
+      const hitZone = scene.add.zone(x, y, cardBaseW * cardScale, scaledH)
+        .setOrigin(0.5).setScrollFactor(0).setDepth(3010)
+        .setInteractive({ useHandCursor: true });
+
+      hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
+      hitZone.on("pointerout",  () => card.getByName("bg").setStrokeStyle(2, path.color));
+      hitZone.on("pointerup",   () => {
+        overlay.destroy(true);
+        pathManager.chosenPath = path.id;
+        showPathChosenEffect.call(scene, path);
+        resumeGameplay.call(scene);
+        pathManager.guaranteeNextSkill = true;
+      });
+      overlay.add(hitZone);
     });
 
-    overlay.add(hitZone);
-  });
+  } else {
+    // 가로: 기존 방식, 화면 너비에 맞게 스케일
+    const cardBaseW = 200;
+    const gap = 20;
+    const totalNeeded = cardBaseW * 3 + gap * 2;
+    const cardScale = Math.min((W - 40) / totalNeeded, 1.0);
+    const spacing = (cardBaseW + gap) * cardScale;
+    const startX = cx - spacing;
+
+    paths.forEach((path, i) => {
+      const x = startX + i * spacing;
+      const y = cy + 20;
+      const card = createPathCard.call(scene, x, y, path);
+      card.setScale(cardScale);
+      overlay.add(card);
+
+      const hitZone = scene.add.zone(x, y, cardBaseW * cardScale, 340 * cardScale)
+        .setOrigin(0.5).setScrollFactor(0).setDepth(3010)
+        .setInteractive({ useHandCursor: true });
+
+      hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
+      hitZone.on("pointerout",  () => card.getByName("bg").setStrokeStyle(2, path.color));
+      hitZone.on("pointerup",   () => {
+        overlay.destroy(true);
+        pathManager.chosenPath = path.id;
+        showPathChosenEffect.call(scene, path);
+        resumeGameplay.call(scene);
+        pathManager.guaranteeNextSkill = true;
+      });
+      overlay.add(hitZone);
+    });
+  }
 }
 
 function createPathCard(x, y, path) {
