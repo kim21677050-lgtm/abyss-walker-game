@@ -49,47 +49,47 @@ const PATH_SKILLS = {
   dragonGaze: {
     id: "dragonGaze", path: "dragon", name: "시선", icon: "👁",
     color: 0xff6644, colorHex: "#ff6644",
-    desc: "주변 적에게 둔화를 부여. 2스택 시 0.5초 스턴 후 스택 리셋.",
+    desc: "용의 눈빛으로 주변 적을 짓누릅니다.",
   },
   dragonBreath: {
     id: "dragonBreath", path: "dragon", name: "브레스", icon: "🔥",
     color: 0xff8833, colorHex: "#ff8833",
-    desc: "이동 방향으로 넓은 브레스를 발사. 높은 공격력.",
+    desc: "이동 방향으로 용의 숨결을 뿜습니다.",
   },
   dragonEternal: {
     id: "dragonEternal", path: "dragon", name: "영원불멸", icon: "⏸",
     color: 0xffcc44, colorHex: "#ffcc44",
-    desc: "10초간 시간 정지. 플레이어만 이동·공격 가능. 쿨타임 45초.",
+    desc: "전장을 멈추고 혼자만 움직입니다.",
   },
   warriorBaek: {
     id: "warriorBaek", path: "warrior", name: "백경무예", icon: "🛡",
     color: 0xffee44, colorHex: "#ffee44",
-    desc: "피격 시(10초 쿨) 무적+주변 적 날려버림.", order: 0,
+    desc: "피격 순간 몸을 지키고 적을 밀쳐냅니다.", order: 0,
   },
   warriorMu: {
     id: "warriorMu", path: "warrior", name: "무량무예", icon: "∞",
     color: 0xffbb22, colorHex: "#ffbb22",
-    desc: "모든 무기·스킬 10회 시전마다 2회 추가 시전.", order: 1,
+    desc: "무기와 스킬이 때때로 추가로 발동합니다.", order: 1,
   },
   warriorMan: {
     id: "warriorMan", path: "warrior", name: "만상무예", icon: "💥",
     color: 0xff8800, colorHex: "#ff8800",
-    desc: "70번 공격마다 주변 전체를 뒤덮는 거대 폭발.", order: 2,
+    desc: "공격의 흐름이 거대한 폭발로 이어집니다.", order: 2,
   },
   monsterShed: {
     id: "monsterShed", path: "monster", name: "시해", icon: "🐍",
     color: 0x44ff88, colorHex: "#44ff88",
-    desc: "1분마다 허물 벗기: 무적+잃은 체력 50% 회복. 획득 시 최대체력 25% 감소.",
+    desc: "허물을 벗어 상처를 회복하지만 대가를 치릅니다.",
   },
   monsterDevour: {
     id: "monsterDevour", path: "monster", name: "탐식", icon: "🦷",
     color: 0x22ffcc, colorHex: "#22ffcc",
-    desc: "30초마다 주변 적을 먹어치워 최대체력 7% 회복.",
+    desc: "근처의 적을 집어삼켜 생명력을 되찾습니다.",
   },
   monsterDream: {
     id: "monsterDream", path: "monster", name: "괴물의 꿈", icon: "😴",
     color: 0x88ff44, colorHex: "#88ff44",
-    desc: "2분마다 10초간 주변 적들이 플레이어를 피해 도망침.",
+    desc: "악몽을 퍼뜨려 적들이 달아나게 합니다.",
   },
 };
 
@@ -126,30 +126,148 @@ let elapsedSeconds = 0, enemySpawnRemainder = 0;
 let joystick = null;
 let playerHp = 100, playerMaxHp = 100;
 let healthBarBg, healthBarGreen, healthBarRed;
+let healthBarWidth = 180;
 let isDead = false, lastDamageTime = 0;
 const CONTACT_DAMAGE_PER_SEC = 34;
 let gameStartTime = 0;
 let devMode = false, devPanelEl = null, gameSceneRef = null;
+let devPendingLevelChoice = false;
 let timerText = null, devBtnEl = null, lastMoveAngle = 0;
 let bgChunks = new Map();
 const CHUNK_SIZE = 512, CHUNK_RENDER_RADIUS = 3;
 const playerVelocity = { x: 0, y: 0 };
+const PATH_CARD_WIDTH = 250;
+const PATH_CARD_HEIGHT = 340;
+const UI = {
+  ink: 0x05070b,
+  panel: 0x11131a,
+  panelDark: 0x06080d,
+  cyan: 0x6ee7d2,
+  gold: 0xc9a34a,
+  red: 0xb83a2f,
+  text: "#f8fafc",
+  muted: "#aeb7c2",
+};
+
+function hexColor(value) {
+  return `#${value.toString(16).padStart(6, "0")}`;
+}
+
+function responsiveScale(scene, min = 0.72, max = 1) {
+  const w = scene.scale.width, h = scene.scale.height;
+  return Phaser.Math.Clamp(Math.min(w / 980, h / 720), min, max);
+}
+
+function createGlassPanel(scene, x, y, width, height, accent = UI.cyan, alpha = 0.94) {
+  const outer = scene.add.rectangle(x, y, width, height, UI.panelDark, alpha)
+    .setStrokeStyle(1.5, accent, 0.62);
+  const inner = scene.add.rectangle(x, y - height * 0.24, width - 8, height * 0.48, UI.panel, 0.26);
+  const line = scene.add.rectangle(x, y - height / 2 + 12, width - 28, 1, accent, 0.38);
+  return { outer, inner, line };
+}
+
+// ─────────────────────────────
+// 개발자 모드 전용
+// ─────────────────────────────
+
+function setInternalSurvivalTime(seconds) {
+  if (!gameSceneRef) return;
+
+  const targetSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  gameStartTime = gameSceneRef.time.now - targetSeconds * 1000;
+  elapsedSeconds = Math.floor(targetSeconds / 10) * 10;
+  enemyMaxHp = 3 + Math.floor(targetSeconds / 45) * 5;
+  enemySpawnBonus = 0;
+  for (let t = 10; t <= elapsedSeconds; t += 10) {
+    enemySpawnBonus += 0.12 + t * 0.004;
+  }
+  enemySpawnRemainder = 0;
+
+  if (spawnTimer) {
+    spawnTimer.delay = Math.max(120, 250 - elapsedSeconds * 1.2);
+  }
+  enemies?.getChildren().forEach((enemy) => {
+    if (!enemy.active) return;
+    enemy.maxHp = enemyMaxHp;
+    enemy.hp = Math.min(enemy.hp || enemyMaxHp, enemyMaxHp);
+  });
+
+  if (timerText) {
+    const mm = String(Math.floor(targetSeconds / 60)).padStart(2, "0");
+    const ss = String(targetSeconds % 60).padStart(2, "0");
+    timerText.setText(`${mm}:${ss}`);
+  }
+
+  console.log(`생존시간 변경: ${targetSeconds}초`);
+}
+
+function getExpRequirementForLevel(targetLevel) {
+  let required = 5;
+  for (let i = 1; i < targetLevel; i++) {
+    required += getNextExpIncrease(required);
+  }
+  return required;
+}
+
+function getNextExpIncrease(currentRequirement) {
+  return Math.max(5, Math.floor(currentRequirement * 0.2 + 0.2));
+}
+
+function setDevLevel(targetLevel, queueChoice = true) {
+  const nextLevel = Math.max(1, Math.floor(Number(targetLevel) || 1));
+  level = nextLevel;
+  exp = 0;
+  expToNextLevel = getExpRequirementForLevel(level);
+  devPendingLevelChoice = queueChoice && level > 1;
+
+  updateExpHud();
+  if (levelText) levelText.setText(`Lv. ${level}`);
+
+  console.log(`레벨 변경: ${level}`);
+}
+
+function showQueuedDevLevelChoice() {
+  if (!gameSceneRef || !devPendingLevelChoice || isDead) return;
+  if (isChoosingWeapon) return;
+  devPendingLevelChoice = false;
+
+  showLevelUpText.call(gameSceneRef);
+  if (level === PATH_SELECT_LEVEL && !pathManager.chosenPath) {
+    pauseGameplay.call(gameSceneRef);
+    showPathSelection.call(gameSceneRef);
+  } else {
+    showWeaponSelection.call(gameSceneRef);
+  }
+}
+
+window.setSurvivalTime = function(seconds) {
+  setInternalSurvivalTime(seconds);
+};
+
+window.setLevel = function(targetLevel) {
+  setDevLevel(targetLevel, true);
+};
+
+window.setGameTime = function(minutes) {
+  setInternalSurvivalTime((Number(minutes) || 0) * 60);
+  console.log(`${minutes}분 상태로 변경`);
+};
 
 function makeText(scene, x, y, content, style = {}) {
   const isMobile = scene.scale.width < 768;
   const baseSize = parseInt(style.fontSize ?? "16px");
-  const scaledSize = isMobile ? Math.round(baseSize * 1.35) : baseSize;
+  const scaledSize = isMobile ? Math.round(baseSize * 1.12) : baseSize;
 
   const defaultStyle = {
-    fontFamily: "'Arial Black', 'Arial Bold', Arial, sans-serif",
+    fontFamily: "'Arial Black', 'Pretendard', 'Segoe UI', Arial, sans-serif",
     fontSize: `${scaledSize}px`,
     color: "#ffffff",
-    stroke: "#000000",
-    strokeThickness: isMobile ? 4 : 2,
+    stroke: "#020308",
+    strokeThickness: isMobile ? 4 : 3,
     shadow: {
       offsetX: 0, offsetY: 1,
       color: "#000000",
-      blur: isMobile ? 6 : 3,
+      blur: isMobile ? 8 : 5,
       fill: true,
     },
   };
@@ -541,7 +659,12 @@ class BlackHoleWeapon extends AutoWeapon {
     this.scene.time.delayedCall(duration, () => {
       pullInterval.destroy();
       explode.call(this.scene, x, y, this.level >= 2 ? 220 : 160, damage);
-      if (this.level >= 4) findEnemiesInRange(x, y, 220).forEach((e) => { e.stunnedUntil = this.scene.time.now + 800; e.setFillStyle(0x99ddff); });
+      if (this.level >= 4) {
+        findEnemiesInRange(x, y, 220).forEach((e) => {
+          e.stunnedUntil = this.scene.time.now + 800;
+          e.setTint(0x99ddff);
+        });
+      }
       if (this.level >= 5) for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; this.scene.time.delayedCall(i * 180, () => this.spawnMiniBlackHole(x + Math.cos(a) * 120, y + Math.sin(a) * 120, damage * 0.45)); }
       outerRing.destroy(); core.destroy(); glow.destroy();
     });
@@ -740,7 +863,7 @@ function create() {
       if (devMode) return;
       level++;
       exp = 0;
-      expToNextLevel += Math.floor(expToNextLevel * 0.2 + 0.2);
+      expToNextLevel += getNextExpIncrease(expToNextLevel);
       showLevelUpText.call(this);
 
       // 15레벨: 길 선택
@@ -851,6 +974,8 @@ class PathManager {
     this.scene = scene;
     this.chosenPath = null;       // "dragon" | "warrior" | "monster" | null
     this.acquiredSkills = [];     // 획득한 스킬 ID 목록
+    this.guaranteeNextSkill = false;
+    this.guaranteed20Done = false;
 
     // 용의 길
     this.gazeTimer = 0;
@@ -946,7 +1071,7 @@ class PathManager {
     this.scene.tweens.add({ targets: [ring, glow], alpha: 0, scale: 1.3, duration: 500, onComplete: () => { ring.destroy(); glow.destroy(); } });
     explode.call(this.scene, player.x, player.y, radius, 18.0);
 
-    const text = makeText(scene, player.x, player.y - 60, "만상무예!", {
+    const text = makeText(this.scene, player.x, player.y - 60, "만상무예!", {
   fontSize: "26px", color: "#ff8800", fontStyle: "bold",
 }).setOrigin(0.5).setDepth(200);
     this.scene.tweens.add({ targets: text, alpha: 0, y: player.y - 120, duration: 1000, onComplete: () => text.destroy() });
@@ -1171,28 +1296,29 @@ function showPathSelection() {
   const scene = gameSceneRef;
   const W = scene.scale.width, H = scene.scale.height;
   const cx = W / 2, cy = H / 2;
-  const isPortrait = H > W;
+  const isPortrait = H > W || W < 760;
 
   const overlay = scene.add.container(0, 0).setScrollFactor(0).setDepth(3000);
-  const shade = scene.add.rectangle(0, 0, W, H, 0x000000, 0.88).setOrigin(0);
+  const shade = scene.add.rectangle(0, 0, W, H, 0x010204, 0.9).setOrigin(0);
+  const glow = scene.add.circle(cx, cy, Math.max(W, H) * 0.5, 0x2a1612, 0.12);
 
-  const titleGlow = scene.add.text(cx, isPortrait ? 28 : cy - 220, "── 길을 선택하라 ──", {
-    fontSize: isPortrait ? "20px" : "32px", color: "#ffffff", fontStyle: "bold", letterSpacing: 8,
+  const titleGlow = makeText(scene, cx, isPortrait ? 28 : cy - 250, "길을 선택하라", {
+    fontSize: isPortrait ? "22px" : "36px", color: UI.text, fontStyle: "900",
   }).setOrigin(0.5);
 
-  const sub = scene.add.text(cx, isPortrait ? 58 : cy - 176, "한번 선택한 길은 이 생애에서 바꿀 수 없다", {
-    fontSize: isPortrait ? "11px" : "14px", color: "#889988", letterSpacing: 2,
+  const sub = makeText(scene, cx, isPortrait ? 58 : cy - 206, "한번 선택한 길은 이 생애에서 바꿀 수 없습니다", {
+    fontSize: isPortrait ? "11px" : "14px", color: UI.muted, strokeThickness: 1,
   }).setOrigin(0.5);
 
-  overlay.add([shade, titleGlow, sub]);
+  overlay.add([shade, glow, titleGlow, sub]);
 
   const paths = Object.values(PATH_TYPES);
 
   if (isPortrait) {
     // 세로: 카드 3개를 세로로 나열, 화면 높이에 맞게 스케일
     const availH = H - 100; // 타이틀 영역 제외
-    const cardBaseH = 320;
-    const cardBaseW = 200;
+    const cardBaseH = PATH_CARD_HEIGHT;
+    const cardBaseW = PATH_CARD_WIDTH;
     const gap = 8;
     const totalNeeded = cardBaseH * 3 + gap * 2;
     const scaleH = availH / totalNeeded;
@@ -1209,12 +1335,12 @@ function showPathSelection() {
       card.setScale(cardScale);
       overlay.add(card);
 
-      const hitZone = scene.add.zone(x, y, cardBaseW * cardScale, scaledH)
+      const hitZone = scene.add.zone(x, y, cardBaseW * cardScale, cardBaseH * cardScale)
         .setOrigin(0.5).setScrollFactor(0).setDepth(3010)
         .setInteractive({ useHandCursor: true });
 
-      hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
-      hitZone.on("pointerout",  () => card.getByName("bg").setStrokeStyle(2, path.color));
+      hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(3, 0xffffff, 0.95));
+      hitZone.on("pointerout",  () => card.getByName("bg").setStrokeStyle(2, path.color, 0.75));
       hitZone.on("pointerup",   () => {
         overlay.destroy(true);
         pathManager.chosenPath = path.id;
@@ -1227,26 +1353,27 @@ function showPathSelection() {
 
   } else {
     // 가로: 기존 방식, 화면 너비에 맞게 스케일
-    const cardBaseW = 200;
+    const cardBaseW = PATH_CARD_WIDTH;
+    const cardBaseH = PATH_CARD_HEIGHT;
     const gap = 20;
     const totalNeeded = cardBaseW * 3 + gap * 2;
-    const cardScale = Math.min((W - 40) / totalNeeded, 1.0);
+    const cardScale = Math.min((W - 40) / totalNeeded, (H - 170) / cardBaseH, 1.0);
     const spacing = (cardBaseW + gap) * cardScale;
     const startX = cx - spacing;
 
     paths.forEach((path, i) => {
       const x = startX + i * spacing;
-      const y = cy + 20;
+      const y = cy + 48;
       const card = createPathCard.call(scene, x, y, path);
       card.setScale(cardScale);
       overlay.add(card);
 
-      const hitZone = scene.add.zone(x, y, cardBaseW * cardScale, 340 * cardScale)
+      const hitZone = scene.add.zone(x, y, cardBaseW * cardScale, cardBaseH * cardScale)
         .setOrigin(0.5).setScrollFactor(0).setDepth(3010)
         .setInteractive({ useHandCursor: true });
 
-      hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
-      hitZone.on("pointerout",  () => card.getByName("bg").setStrokeStyle(2, path.color));
+      hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(3, 0xffffff, 0.95));
+      hitZone.on("pointerout",  () => card.getByName("bg").setStrokeStyle(2, path.color, 0.75));
       hitZone.on("pointerup",   () => {
         overlay.destroy(true);
         pathManager.chosenPath = path.id;
@@ -1261,54 +1388,57 @@ function showPathSelection() {
 
 function createPathCard(x, y, path) {
   const card = this.add.container(x, y);
-  const cardW = 200;
+  const cardW = PATH_CARD_WIDTH;
 
-  // 스킬 개수에 따라 카드 높이 동적 계산
   const skillDefs = PATH_TYPES[path.id].skills.map((sid) => PATH_SKILLS[sid]);
-  const skillAreaH = skillDefs.length * 48;
-  const cardH = 220 + skillAreaH;
+  const cardH = PATH_CARD_HEIGHT;
 
-  const bg = this.add.rectangle(0, 0, cardW, cardH, 0x0a0e1a, 0.97)
-    .setStrokeStyle(2, path.color).setName("bg");
+  const panel = createGlassPanel(this, 0, 0, cardW, cardH, path.color, 0.96);
+  const bg = panel.outer.setName("bg");
 
   const topOffset = -cardH / 2;
 
   // 아이콘
-  const icon = this.add.text(0, topOffset + 36, path.icon, { fontSize: "48px" }).setOrigin(0.5);
-  const name = this.add.text(0, topOffset + 92, path.name, {
-    fontSize: "20px", color: "#ffffff", fontStyle: "bold",
+  const iconGlow = this.add.circle(0, topOffset + 48, 40, path.color, 0.12)
+    .setStrokeStyle(1, path.color, 0.42);
+  const icon = this.add.text(0, topOffset + 45, path.icon, { fontSize: "44px" }).setOrigin(0.5);
+  const name = makeText(this, 0, topOffset + 104, path.name, {
+    fontSize: "23px", color: "#ffffff", fontStyle: "900",
   }).setOrigin(0.5);
 
-  const divider = this.add.rectangle(0, topOffset + 114, 120, 1, path.color, 0.5);
+  const divider = this.add.rectangle(0, topOffset + 132, 170, 1, path.color, 0.5);
 
-  const desc = this.add.text(0, topOffset + 136, path.desc, {
-    fontSize: "12px", color: "#aabbaa", align: "center", wordWrap: { width: 170 },
+  const desc = makeText(this, 0, topOffset + 158, path.desc, {
+    fontSize: "13px", color: "#c8ced5", align: "center", wordWrap: { width: 212 },
+    strokeThickness: 1,
   }).setOrigin(0.5);
 
-  card.add([bg, icon, name, divider, desc]);
+  card.add([bg, panel.inner, panel.line, iconGlow, icon, name, divider, desc]);
 
-  // 스킬 목록 — desc 아래부터 시작
-  const skillStartY = topOffset + 172;
+  const listTitle = makeText(this, 0, topOffset + 200, "고유 스킬", {
+    fontSize: "12px", color: "#8f98a5", fontStyle: "800", strokeThickness: 1,
+  }).setOrigin(0.5);
+  card.add(listTitle);
+
+  const skillStartY = topOffset + 235;
+  const skillRowH = 38;
   skillDefs.forEach((sk, idx) => {
-    const sy = skillStartY + idx * 48;
+    const sy = skillStartY + idx * skillRowH;
 
-    const skillBg = this.add.rectangle(0, sy, 182, 40, 0x111922, 0.9)
-      .setStrokeStyle(1, path.color, 0.35);
-    const skillIcon = this.add.text(-76, sy, sk.icon, { fontSize: "16px" }).setOrigin(0.5);
-    const skillName = this.add.text(-54, sy - 8, sk.name, {
-      fontSize: "13px",
-      color: `#${path.color.toString(16).padStart(6, "0")}`,
-      fontStyle: "bold",
-    }).setOrigin(0, 0.5);
-    const skillDesc = this.add.text(-54, sy + 8, sk.desc, {
-      fontSize: "10px", color: "#99aaaa",
-      wordWrap: { width: 128 },
+    const skillBg = this.add.rectangle(0, sy, 204, 30, 0x0d1018, 0.82)
+      .setStrokeStyle(1, path.color, 0.28);
+    const skillIcon = this.add.text(-76, sy, sk.icon, { fontSize: "17px" }).setOrigin(0.5);
+    const skillName = makeText(this, -50, sy, sk.name, {
+      fontSize: "15px",
+      color: hexColor(path.color),
+      fontStyle: "900",
+      strokeThickness: 2,
     }).setOrigin(0, 0.5);
 
-    card.add([skillBg, skillIcon, skillName, skillDesc]);
+    card.add([skillBg, skillIcon, skillName]);
   });
 
-  
+
   return card;
 }
 
@@ -1338,18 +1468,24 @@ function showWeaponSelection() {
   pauseGameplay.call(this);
 
   const overlay = this.add.container(0, 0).setScrollFactor(0).setDepth(2000);
-  const shade = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.65).setOrigin(0);
+  const W = this.scale.width, H = this.scale.height;
+  const cx = W / 2, cy = H / 2;
+  const shade = this.add.rectangle(0, 0, W, H, 0x03060a, 0.78).setOrigin(0);
+  const isCompact = W < 760 || H < 620;
+  const cardBaseW = 220, cardBaseH = 276;
+  const gap = isCompact ? 8 : 18;
+  const cardScale = isCompact
+    ? Phaser.Math.Clamp(Math.min((W - 34) / cardBaseW, (H - 106) / (cardBaseH * options.length + gap * (options.length - 1))), 0.54, 0.86)
+    : Phaser.Math.Clamp((W - 72) / (cardBaseW * options.length + gap * (options.length - 1)), 0.76, 1);
+  const titleY = isCompact ? 28 : cy - 184;
 
-  const isCompact = this.scale.width < 760;
-  const compactCardScale = Phaser.Math.Clamp((this.scale.height - 92) / (260 * 3 + 24), 0.54, 0.78);
-  const cardScale = isCompact ? compactCardScale : 1;
-  const compactCardHeight = 260 * cardScale;
-  const titleY = isCompact ? 28 : this.scale.height / 2 - 170;
-
-  const title = this.add.text(this.scale.width / 2, titleY, "무기 선택", {
-    fontSize: "32px", color: "#ffffff", fontStyle: "bold",
+  const title = makeText(this, cx, titleY, "선택", {
+    fontSize: `${isCompact ? 22 : 34}px`, color: UI.text, fontStyle: "800",
   }).setOrigin(0.5);
-  overlay.add([shade, title]);
+  const subtitle = makeText(this, cx, titleY + (isCompact ? 28 : 36), "다음 성장을 고르세요", {
+    fontSize: `${isCompact ? 11 : 13}px`, color: UI.muted,
+  }).setOrigin(0.5);
+  overlay.add([shade, title, subtitle]);
 
   let didSelect = false;
   const selectOption = (option) => {
@@ -1368,11 +1504,11 @@ function showWeaponSelection() {
 
   options.forEach((option, index) => {
     const x = isCompact
-      ? this.scale.width / 2
-      : this.scale.width / 2 + (index - 1) * 250;
+      ? cx
+      : cx + (index - (options.length - 1) / 2) * ((cardBaseW + gap) * cardScale);
     const y = isCompact
-      ? 62 + compactCardHeight / 2 + index * (compactCardHeight + 8)
-      : this.scale.height / 2;
+      ? 78 + (cardBaseH * cardScale) / 2 + index * ((cardBaseH + gap) * cardScale)
+      : cy + 28;
 
     let card;
     if (option.isPathSkill) {
@@ -1384,15 +1520,15 @@ function showWeaponSelection() {
     }
     card.setScale(cardScale);
 
-    const hitZone = this.add.zone(x, y, 230 * cardScale, 286 * cardScale)
+    const hitZone = this.add.zone(x, y, cardBaseW * cardScale, cardBaseH * cardScale)
       .setOrigin(0.5).setScrollFactor(0).setDepth(2001 + index)
       .setInteractive({ useHandCursor: true });
 
     hitZone.on("pointerup", () => selectOption(option));
-    hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(4, 0xffffff));
+    hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(3, 0xffffff, 0.95));
     hitZone.on("pointerout", () => {
       const col = option.isPathSkill ? option.skill.color : option.weaponType.color;
-      card.getByName("bg").setStrokeStyle(2, col);
+      card.getByName("bg").setStrokeStyle(2, col, 0.75);
     });
     overlay.add([card, hitZone]);
   });
@@ -1402,33 +1538,36 @@ function createPathSkillCard(x, y, number, skill) {
   const card = this.add.container(x, y);
   const pathDef = PATH_TYPES[skill.path];
 
-  const bg = this.add.rectangle(0, 0, 200, 260, 0x0d1108, 0.97)
-    .setStrokeStyle(2, skill.color).setName("bg");
+  const panel = createGlassPanel(this, 0, 0, 220, 276, skill.color, 0.96);
+  const bg = panel.outer.setName("bg");
+  const badge = this.add.rectangle(-92, -120, 34, 28, 0x1a2433, 0.95)
+    .setStrokeStyle(1, skill.color, 0.55);
 
-  // 번호
-  const key = this.add.text(-82, -112, `${number}`, {
-    fontSize: "18px", color: "#ffffff", backgroundColor: "#2e3544", padding: { x: 8, y: 4 },
-  });
-
-  // 길 배지
-  const pathBadge = this.add.text(0, -118, `${pathDef.icon} ${pathDef.name}`, {
-    fontSize: "11px", color: pathDef.colorHex, letterSpacing: 2,
+  const key = makeText(this, -92, -120, `${number}`, {
+    fontSize: "15px", color: "#ffffff", fontStyle: "800", strokeThickness: 0,
   }).setOrigin(0.5);
 
+  const pathBadge = makeText(this, 0, -119, `${pathDef.icon} ${pathDef.name}`, {
+    fontSize: "12px", color: pathDef.colorHex, strokeThickness: 0,
+  }).setOrigin(0.5);
+
+  const iconRing = this.add.circle(0, -64, 34, skill.color, 0.12)
+    .setStrokeStyle(1, skill.color, 0.42);
   const icon = this.add.text(0, -66, skill.icon, { fontSize: "38px" }).setOrigin(0.5);
-  const name = this.add.text(0, -18, skill.name, {
-    fontSize: "22px", color: "#ffffff", fontStyle: "bold",
+  const name = makeText(this, 0, -18, skill.name, {
+    fontSize: "22px", color: UI.text, fontStyle: "800",
   }).setOrigin(0.5);
 
-  const typeBadge = this.add.text(0, 20, "✦ 길 스킬 ✦", {
-    fontSize: "12px", color: skill.colorHex, letterSpacing: 2,
+  const typeBadge = makeText(this, 0, 20, "길 스킬", {
+    fontSize: "12px", color: skill.colorHex, strokeThickness: 0,
   }).setOrigin(0.5);
 
-  const desc = this.add.text(0, 64, skill.desc, {
-    fontSize: "13px", color: "#d8deea", align: "center", wordWrap: { width: 165 },
+  const desc = makeText(this, 0, 74, skill.desc, {
+    fontSize: "13px", color: "#d8deea", align: "center", wordWrap: { width: 172 },
+    strokeThickness: 0,
   }).setOrigin(0.5);
 
-  card.add([bg, key, pathBadge, icon, name, typeBadge, desc]);
+  card.add([bg, panel.inner, panel.line, badge, key, pathBadge, iconRing, icon, name, typeBadge, desc]);
   return card;
 }
 
@@ -1607,10 +1746,10 @@ function showDreamEffect(scene) {
 
 // ─── 조이스틱 ────────────────────────────────────────────
 function createJoystick() {
-  const base = this.add.circle(0, 0, 58, 0xffffff, 0.1)
-    .setStrokeStyle(3, 0x8df7ff, 0.45).setScrollFactor(0).setDepth(1500).setVisible(false);
-  const knob = this.add.circle(0, 0, 24, 0x8df7ff, 0.35)
-    .setStrokeStyle(2, 0xffffff, 0.55).setScrollFactor(0).setDepth(1501).setVisible(false);
+  const base = this.add.circle(0, 0, 58, 0x0d1b25, 0.42)
+    .setStrokeStyle(2, UI.cyan, 0.45).setScrollFactor(0).setDepth(1500).setVisible(false);
+  const knob = this.add.circle(0, 0, 24, UI.cyan, 0.32)
+    .setStrokeStyle(2, 0xffffff, 0.62).setScrollFactor(0).setDepth(1501).setVisible(false);
 
   joystick = { base, knob, pointerId: null, active: false, radius: 54, vector: new Phaser.Math.Vector2(0, 0) };
 
@@ -1678,11 +1817,6 @@ function movePlayer() {
   else if (!isMoving && player.anims.currentAnim?.key !== "idle") player.play("idle");
 }
 
-  const isMoving = Math.abs(playerVelocity.x) > 10 || Math.abs(playerVelocity.y) > 10;
-  if (isMoving && player.anims.currentAnim?.key !== "walk") player.play("walk");
-  else if (!isMoving && player.anims.currentAnim?.key !== "idle") player.play("idle");
-
-
 function pullExpOrbs() {
   expOrbs.getChildren().forEach((orb) => {
     if (Phaser.Math.Distance.Between(player.x, player.y, orb.x, orb.y) < 225)
@@ -1721,25 +1855,34 @@ function resumeGameplay() {
 function createWeaponCard(x, y, number, weaponType, nextLevel) {
   const card = this.add.container(x, y);
   const nextDamage = getWeaponDamage(weaponType.id, nextLevel);
-  const bg = this.add.rectangle(0, 0, 200, 260, 0x151a24, 0.96)
-    .setStrokeStyle(2, weaponType.color).setName("bg");
-  const key = this.add.text(-82, -112, `${number}`, {
-    fontSize: "18px", color: "#ffffff", backgroundColor: "#2e3544", padding: { x: 8, y: 4 },
-  });
-  const icon = this.add.text(0, -66, weaponType.icon, {
-    fontSize: "34px", color: `#${weaponType.color.toString(16).padStart(6, "0")}`, fontStyle: "bold",
+  const panel = createGlassPanel(this, 0, 0, 220, 276, weaponType.color, 0.96);
+  const bg = panel.outer.setName("bg");
+  const badge = this.add.rectangle(-92, -120, 34, 28, 0x1a2433, 0.95)
+    .setStrokeStyle(1, weaponType.color, 0.55);
+  const key = makeText(this, -92, -120, `${number}`, {
+    fontSize: "15px", color: "#ffffff", fontStyle: "800", strokeThickness: 0,
   }).setOrigin(0.5);
-  const name = this.add.text(0, -18, weaponType.name, {
-    fontSize: "22px", color: "#ffffff", fontStyle: "bold",
+  const iconPlate = this.add.circle(0, -67, 36, weaponType.color, 0.12)
+    .setStrokeStyle(1, weaponType.color, 0.45);
+  const icon = makeText(this, 0, -67, weaponType.icon, {
+    fontSize: "31px", color: hexColor(weaponType.color), fontStyle: "900",
   }).setOrigin(0.5);
-  const levelLabel = this.add.text(0, 20, `Lv.${nextLevel}`, { fontSize: "18px", color: "#b7f7ff" }).setOrigin(0.5);
-  const damageLabel = this.add.text(0, 52, `DMG ${formatDamage(nextDamage)} / hit`, {
-    fontSize: "15px", color: "#fff0a6", fontStyle: "bold",
+  const name = makeText(this, 0, -18, weaponType.name, {
+    fontSize: "21px", color: UI.text, fontStyle: "800",
   }).setOrigin(0.5);
-  const desc = this.add.text(0, 88, weaponType.desc[nextLevel - 1], {
-    fontSize: "15px", color: "#d8deea", align: "center", wordWrap: { width: 160 },
+  const levelPill = this.add.rectangle(0, 22, 76, 24, weaponType.color, 0.13)
+    .setStrokeStyle(1, weaponType.color, 0.55);
+  const levelLabel = makeText(this, 0, 22, `Lv.${nextLevel}`, {
+    fontSize: "14px", color: "#d8f7ff", fontStyle: "800", strokeThickness: 0,
   }).setOrigin(0.5);
-  card.add([bg, key, icon, name, levelLabel, damageLabel, desc]);
+  const damageLabel = makeText(this, 0, 58, `DMG ${formatDamage(nextDamage)} / hit`, {
+    fontSize: "14px", color: "#fff0a6", fontStyle: "800", strokeThickness: 0,
+  }).setOrigin(0.5);
+  const desc = makeText(this, 0, 96, weaponType.desc[nextLevel - 1], {
+    fontSize: "14px", color: "#d8deea", align: "center", wordWrap: { width: 170 },
+    strokeThickness: 0,
+  }).setOrigin(0.5);
+  card.add([bg, panel.inner, panel.line, badge, key, iconPlate, icon, name, levelPill, levelLabel, damageLabel, desc]);
   return card;
 }
 
@@ -1767,15 +1910,22 @@ function layoutHud(scene, width = scene.scale.width, height = scene.scale.height
   const safeWidth = Math.max(150, width - padding * 2);
 
   levelText.setPosition(padding, padding).setFontSize(compact ? "18px" : "24px");
-  timerText.setPosition(width / 2, padding).setFontSize(compact ? "16px" : "22px");
-  weaponText.setPosition(padding, compact ? padding + 34 : padding + 38).setFontSize(compact ? "12px" : "16px");
-  weaponText.setWordWrapWidth(compact ? Math.floor(safeWidth * 0.62) : Math.floor(safeWidth * 0.55));
+  timerText.setPosition(width / 2, padding).setFontSize(compact ? "17px" : "22px");
   expInfoText.setPosition(width - padding, padding).setFontSize(compact ? "12px" : "15px");
-  expInfoText.setWordWrapWidth(Math.floor(safeWidth * 0.35));
+  expInfoText.setWordWrapWidth(Math.floor(safeWidth * 0.34));
+
+  weaponText.setPosition(padding, compact ? height - 76 : padding + 42).setFontSize(compact ? "12px" : "15px");
+  weaponText.setWordWrapWidth(compact ? Math.floor(safeWidth) : Math.floor(safeWidth * 0.58));
+  weaponText.setDepth(1000);
   scene.cameras.main.setViewport(0, 0, width, height);
-  healthBarBg.setPosition(width - 210, 72);
-  healthBarGreen.setPosition(width - 210, 72);
-  healthBarRed.setPosition(width - 210, 72);
+
+  healthBarWidth = compact ? Math.min(150, width * 0.38) : 180;
+  const healthX = compact ? width - padding - healthBarWidth : width - padding - healthBarWidth;
+  const healthY = compact ? padding + 48 : padding + 52;
+  healthBarBg.setPosition(healthX, healthY).setSize(healthBarWidth, compact ? 9 : 10);
+  healthBarGreen.setPosition(healthX, healthY).setSize(healthBarWidth, compact ? 9 : 10);
+  healthBarRed.setPosition(healthX, healthY).setSize(healthBarWidth, compact ? 9 : 10);
+  updateHealthBar();
 }
 
 function updateCameraZoom(width) {
@@ -2166,9 +2316,9 @@ function applyContactDamage(delta) {
 
 function updateHealthBar() {
   const ratio = Phaser.Math.Clamp(playerHp / playerMaxHp, 0, 1);
-  healthBarGreen.width = 180 * ratio;
-  healthBarRed.width = 180 - 180 * ratio;
-  healthBarRed.x = healthBarBg.x + 180 * ratio;
+  healthBarGreen.width = healthBarWidth * ratio;
+  healthBarRed.width = healthBarWidth - healthBarWidth * ratio;
+  healthBarRed.x = healthBarBg.x + healthBarWidth * ratio;
 }
 
 function killPlayer() {
@@ -2214,20 +2364,31 @@ function showStartScreen() {
   isChoosingWeapon = true;
 
   const W = this.scale.width, H = this.scale.height, cx = W / 2, cy = H / 2;
+  const compact = W < 680 || H < 620;
+  const scale = responsiveScale(this, 0.78, 1);
+  const titleY = compact ? Math.max(112, H * 0.28) : cy - 82;
+  const buttonY = compact ? Math.min(H - 128, titleY + 150 * scale) : cy + 108;
   const objs = [];
-  const bg = this.add.rectangle(0, 0, W, H, 0x000000, 0.88).setOrigin(0).setScrollFactor(0).setDepth(9000);
-  const lineTop = this.add.rectangle(cx, cy - 112, 260, 1, 0x00ffd5, 0.35).setScrollFactor(0).setDepth(9001);
-  const title1 = makeText(this, cx, cy - 88, "ABYSS", { fontSize: "64px", color: "#00ffd5", fontStyle: "bold", letterSpacing: 18 }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
-  const title2 = makeText(this, cx, cy - 20, "WALKER", { fontSize: "38px", color: "#ffffff", fontStyle: "bold", letterSpacing: 22 }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
-  const lineBot = this.add.rectangle(cx, cy + 18, 260, 1, 0x00ffd5, 0.35).setScrollFactor(0).setDepth(9001);
-  const sub = makeText(this, cx, cy + 44, "어둠 속을 걸어라", { fontSize: "16px", color: "#7ecfc0", letterSpacing: 4 }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
-  const btnBg = this.add.rectangle(cx, cy + 108, 200, 48, 0x00ffd5, 0.12).setStrokeStyle(1.5, 0x00ffd5, 0.75).setScrollFactor(0).setDepth(9002).setInteractive({ useHandCursor: true });
-  const btnText = makeText(this, cx, cy + 108, "ENTER THE ABYSS", { fontSize: "15px", color: "#00ffd5", fontStyle: "bold", letterSpacing: 3 }).setOrigin(0.5).setScrollFactor(0).setDepth(9003).setInteractive({ useHandCursor: true });
-  const hint = makeText(this, cx, cy + 164, "WASD / 조이스틱으로 이동", { fontSize: "12px", color: "#aacccc" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const bg = this.add.rectangle(0, 0, W, H, 0x03060a, 0.9).setOrigin(0).setScrollFactor(0).setDepth(9000);
+  const vignette = this.add.circle(cx, cy, Math.max(W, H) * 0.58, 0x183348, 0.16).setScrollFactor(0).setDepth(9000);
+  const lineTop = this.add.rectangle(cx, titleY - 62 * scale, Math.min(360, W - 52), 1, UI.cyan, 0.45).setScrollFactor(0).setDepth(9001);
+  const title1 = makeText(this, cx, titleY, "ABYSS", { fontSize: `${compact ? 52 : 72}px`, color: "#48f5d7", fontStyle: "900" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const title2 = makeText(this, cx, titleY + 54 * scale, "WALKER", { fontSize: `${compact ? 30 : 42}px`, color: "#f7fbff", fontStyle: "800" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const lineBot = this.add.rectangle(cx, titleY + 88 * scale, Math.min(320, W - 72), 1, UI.cyan, 0.45).setScrollFactor(0).setDepth(9001);
+  const sub = makeText(this, cx, titleY + 116 * scale, "어둠 속을 걸어라", { fontSize: `${compact ? 13 : 16}px`, color: "#9fe8dc" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const btnW = Math.min(compact ? W - 72 : 240, 280);
+  const btnBg = this.add.rectangle(cx, buttonY, btnW, 54, 0x102933, 0.92).setStrokeStyle(2, UI.cyan, 0.85).setScrollFactor(0).setDepth(9002).setInteractive({ useHandCursor: true });
+  const btnGlow = this.add.rectangle(cx, buttonY, btnW - 10, 44, UI.cyan, 0.08).setScrollFactor(0).setDepth(9002);
+  const btnText = makeText(this, cx, buttonY, "ENTER THE ABYSS", { fontSize: `${compact ? 13 : 15}px`, color: "#48f5d7", fontStyle: "800" }).setOrigin(0.5).setScrollFactor(0).setDepth(9003).setInteractive({ useHandCursor: true });
+  const hint = makeText(this, cx, Math.min(H - 44, buttonY + 68), "WASD / 조이스틱으로 이동", { fontSize: "12px", color: "#b7c9d8" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
 
-  objs.push(bg, lineTop, title1, title2, lineBot, sub, btnBg, btnText, hint);
+  objs.push(bg, vignette, lineTop, title1, title2, lineBot, sub, btnBg, btnGlow, btnText, hint);
   this.tweens.add({ targets: [btnBg, btnText], alpha: { from: 0.6, to: 1 }, duration: 900, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
-  objs.forEach((obj, i) => { obj.setAlpha(0); this.tweens.add({ targets: obj, alpha: i === 1 || i === 4 ? 0.35 : 1, duration: 500, delay: i * 80 }); });
+  objs.forEach((obj, i) => {
+    obj.setAlpha(0);
+    const targetAlpha = obj === vignette ? 0.16 : (obj === lineTop || obj === lineBot ? 0.45 : 1);
+    this.tweens.add({ targets: obj, alpha: targetAlpha, duration: 500, delay: i * 70 });
+  });
 
   const startGame = () => {
     objs.forEach((obj) => obj.destroy());
@@ -2265,7 +2426,13 @@ function createDevConsole() {
     if (val === "소드마스터") {
       devMode = !devMode;
       showDevNotice(devMode ? "⚔ DEV MODE ON" : "DEV MODE OFF", devMode ? "#00ffd5" : "#ff4444");
-      if (devMode) createDevButton(); else { removeDevPanel(); removeDevButton(); }
+      if (devMode) {
+        createDevButton();
+      } else {
+        removeDevPanel();
+        removeDevButton();
+        showQueuedDevLevelChoice();
+      }
     }
   });
 }
@@ -2289,6 +2456,81 @@ function showDevPanel() {
   title.textContent = "⚔ DEV MODE";
   title.style.cssText = "color:#00ffd5;font-size:16px;font-weight:bold;letter-spacing:3px;margin-bottom:16px;";
   panel.appendChild(title);
+
+  const controlTitle = document.createElement("div");
+  controlTitle.textContent = "⏱ 게임 상태";
+  controlTitle.style.cssText = "color:#ffdd44;font-size:13px;font-weight:bold;letter-spacing:2px;margin-bottom:10px;";
+  panel.appendChild(controlTitle);
+
+  const fieldStyle = "background:#101827;border:1px solid #334;color:#fff;padding:5px 7px;border-radius:4px;font-size:12px;width:72px;font-family:monospace;";
+  const buttonStyle = "background:transparent;border:1px solid #00ffd5;color:#00ffd5;padding:5px 9px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:12px;";
+
+  const secondsNow = gameSceneRef ? Math.max(0, Math.floor((gameSceneRef.time.now - gameStartTime) / 1000)) : 0;
+  const timeRow = document.createElement("div");
+  timeRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;";
+  const timeLabel = document.createElement("span");
+  timeLabel.textContent = "생존 초";
+  timeLabel.style.cssText = "width:70px;font-size:13px;color:#b7f7ff;";
+  const timeInput = document.createElement("input");
+  timeInput.type = "number";
+  timeInput.min = "0";
+  timeInput.step = "1";
+  timeInput.value = String(secondsNow);
+  timeInput.style.cssText = fieldStyle;
+  const timeApply = document.createElement("button");
+  timeApply.textContent = "적용";
+  timeApply.style.cssText = buttonStyle;
+  timeApply.addEventListener("click", () => {
+    setInternalSurvivalTime(parseInt(timeInput.value, 10));
+    showDevNotice(`TIME ${timeInput.value}s`, "#00ffd5");
+  });
+  const minuteApply = document.createElement("button");
+  minuteApply.textContent = "분으로 적용";
+  minuteApply.style.cssText = buttonStyle;
+  minuteApply.addEventListener("click", () => {
+    const minutes = Number(timeInput.value) || 0;
+    const seconds = Math.floor(minutes * 60);
+    timeInput.value = String(seconds);
+    setInternalSurvivalTime(seconds);
+    showDevNotice(`TIME ${minutes}m`, "#00ffd5");
+  });
+  timeRow.appendChild(timeLabel);
+  timeRow.appendChild(timeInput);
+  timeRow.appendChild(timeApply);
+  timeRow.appendChild(minuteApply);
+  panel.appendChild(timeRow);
+
+  const levelRow = document.createElement("div");
+  levelRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;";
+  const levelLabel = document.createElement("span");
+  levelLabel.textContent = "레벨";
+  levelLabel.style.cssText = "width:70px;font-size:13px;color:#b7f7ff;";
+  const levelInput = document.createElement("input");
+  levelInput.type = "number";
+  levelInput.min = "1";
+  levelInput.step = "1";
+  levelInput.value = String(level);
+  levelInput.style.cssText = fieldStyle;
+  const levelApply = document.createElement("button");
+  levelApply.textContent = "적용";
+  levelApply.style.cssText = buttonStyle;
+  levelApply.addEventListener("click", () => {
+    setDevLevel(parseInt(levelInput.value, 10), true);
+    showDevNotice(`LV ${level}`, "#00ffd5");
+  });
+  const levelHint = document.createElement("span");
+  levelHint.textContent = "DEV OFF 시 선택지 1회";
+  levelHint.style.cssText = "font-size:11px;color:#8aa;";
+  levelRow.appendChild(levelLabel);
+  levelRow.appendChild(levelInput);
+  levelRow.appendChild(levelApply);
+  levelRow.appendChild(levelHint);
+  panel.appendChild(levelRow);
+
+  const weaponTitle = document.createElement("div");
+  weaponTitle.textContent = "⚔ 무기";
+  weaponTitle.style.cssText = "color:#ffdd44;font-size:13px;font-weight:bold;letter-spacing:2px;margin-top:16px;border-top:1px solid #223;padding-top:12px;margin-bottom:10px;";
+  panel.appendChild(weaponTitle);
 
   WEAPON_TYPES.forEach((weapon) => {
     const row = document.createElement("div");
@@ -2356,6 +2598,18 @@ function showDevPanel() {
   closeBtn.style.cssText = "margin-top:16px;width:100%;background:transparent;border:1px solid #00ffd5;color:#00ffd5;padding:6px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:13px;letter-spacing:2px;";
   closeBtn.addEventListener("click", () => removeDevPanel());
   panel.appendChild(closeBtn);
+
+  const devOffBtn = document.createElement("button");
+  devOffBtn.textContent = "DEV OFF";
+  devOffBtn.style.cssText = "margin-top:8px;width:100%;background:rgba(255,68,68,0.08);border:1px solid #ff4444;color:#ff7777;padding:6px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:13px;letter-spacing:2px;";
+  devOffBtn.addEventListener("click", () => {
+    devMode = false;
+    removeDevPanel();
+    removeDevButton();
+    showDevNotice("DEV MODE OFF", "#ff4444");
+    showQueuedDevLevelChoice();
+  });
+  panel.appendChild(devOffBtn);
   document.body.appendChild(panel);
   devPanelEl = panel;
 }
