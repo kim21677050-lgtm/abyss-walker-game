@@ -232,6 +232,7 @@ let devMode = false;
 let devPanelEl = null;
 let gameSceneRef = null;
 let devBtnEl = null;
+let lastMoveAngle = 0; // 마지막 이동 방향 저장
 let bgChunks = new Map(); // 청크 캐시
 const CHUNK_SIZE = 512;   // 청크 하나의 픽셀 크기
 const CHUNK_RENDER_RADIUS = 3; // 플레이어 주변 몇 청크까지 그릴지
@@ -563,6 +564,10 @@ function movePlayer() {
   }
 
   player.body.setVelocity(playerVelocity.x, playerVelocity.y);
+
+if (Math.abs(playerVelocity.x) > 30 || Math.abs(playerVelocity.y) > 30) {
+    lastMoveAngle = Math.atan2(playerVelocity.y, playerVelocity.x);
+  }
 
   const isMoving = Math.abs(playerVelocity.x) > 10 || Math.abs(playerVelocity.y) > 10;
   if (isMoving && player.anims.currentAnim?.key !== "walk") {
@@ -1778,70 +1783,105 @@ class ScytheWeapon extends AutoWeapon {
     }
   }
 
+  // 수정
   swing(time) {
-    const target = findNearestEnemy();
-    const range = this.level >= 2 ? 210 : 160;
-    const baseAngle = target
-      ? Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y)
-      : this.swingAngle;
+    const range = 250;
+    const baseAngle = lastMoveAngle - Math.PI * 0.75;
 
-    this.swingAngle = baseAngle;
+    const scythe = this.scene.add.image(player.x, player.y, "death-scythe")
+      .setDisplaySize(range * 2.2, range * 2.2)
+      .setDepth(29)
+      .setAlpha(1)
+      .setOrigin(0.15, 0.85)
+      .setRotation(baseAngle);
 
-    // 낫 호 — 크고 날카롭게
-    const arc = this.scene.add.arc(player.x, player.y, range, -75, 75, false, 0x88ffcc, 0.15)
-      .setAngle(Phaser.Math.RadToDeg(baseAngle))
-      .setStrokeStyle(10, 0x88ffcc, 0.85)
-      .setDepth(28);
+    const startTime = this.scene.time.now;
+    const duration = 900;
+    const savedAngle = baseAngle; // 클로저 안에서 쓸 복사본
 
-    const edge = this.scene.add.arc(player.x, player.y, range + 14, -68, 68, false, 0xffffff, 0)
-      .setAngle(Phaser.Math.RadToDeg(baseAngle))
-      .setStrokeStyle(3, 0xccffee, 0.95)
-      .setDepth(29);
+    let followTimer = this.scene.time.addEvent({
+      delay: 16,
+      loop: true,
+      callback: () => {
+        if (!scythe.active) { followTimer.destroy(); return; }
+        scythe.setPosition(player.x, player.y);
+        const elapsed = this.scene.time.now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        scythe.setRotation(savedAngle + Math.PI * 2 * progress);
 
-    // 손잡이
-    const handleEndX = player.x + Math.cos(baseAngle + Math.PI) * 55;
-    const handleEndY = player.y + Math.sin(baseAngle + Math.PI) * 55;
-    const handle = this.scene.add.line(
-      0, 0,
-      player.x, player.y,
-      handleEndX, handleEndY,
-      0x88ffcc, 0.6
-    ).setLineWidth(3).setDepth(27);
-
-    // 슬래시 잔상
-    for (let i = 0; i < 6; i++) {
-      const trailAngle = baseAngle - 0.55 + (i / 6) * 1.1;
-      const tx = player.x + Math.cos(trailAngle) * range;
-      const ty = player.y + Math.sin(trailAngle) * range;
-      const trail = this.scene.add.circle(tx, ty, 5, 0x88ffcc, 0.5).setDepth(27);
-      this.scene.tweens.add({
-        targets: trail,
-        alpha: 0,
-        scale: 0.1,
-        duration: 200 + i * 30,
-        onComplete: () => trail.destroy(),
-      });
-    }
-
-    this.scene.tweens.add({
-      targets: [arc, edge, handle],
-      alpha: 0,
-      scale: 1.08,
-      duration: 250,
-      ease: "Cubic.easeOut",
-      onComplete: () => { arc.destroy(); edge.destroy(); handle.destroy(); },
+        if (progress >= 1) {
+          followTimer.destroy();
+          this.scene.tweens.add({
+            targets: scythe,
+            alpha: 0,
+            duration: 150,
+            onComplete: () => scythe.destroy(),
+          });
+        }
+      },
     });
 
-    const pierce = this.level >= 4;
-    const hitEnemies = new Set();
+    const ring = this.scene.add.circle(player.x, player.y, range, 0xccffaa, 0)
+      .setStrokeStyle(3, 0xccffaa, 0.6)
+      .setDepth(27);
+    this.scene.tweens.add({
+      targets: ring,
+      alpha: 0,
+      scale: 1.15,
+      duration: 400,
+      ease: "Cubic.easeOut",
+      onComplete: () => ring.destroy(),
+    });
 
-    findEnemiesInRange(player.x, player.y, range, pierce ? Infinity : 8).forEach((enemy) => {
-      const eAngle = Phaser.Math.Angle.Between(player.x, player.y, enemy.x, enemy.y);
-      const diff = Phaser.Math.Angle.Wrap(eAngle - baseAngle);
-      if (Math.abs(diff) <= 1.35 && !hitEnemies.has(enemy)) {
-        hitEnemies.add(enemy);
-        damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level));
-      }
+    findEnemiesInRange(player.x, player.y, range).forEach((e) => {
+      damageEnemy.call(this.scene, e, 11.0);
+    });
+
+    const hitEnemies = new Set(findEnemiesInRange(player.x, player.y, range));
+    const chainTargets = findEnemiesInRange(player.x, player.y, 520, 5)
+      .filter((e) => !hitEnemies.has(e));
+
+    chainTargets.forEach((e, i) => {
+      this.scene.time.delayedCall(i * 70, () => {
+        if (!e.active || !e.body) return;
+        const g = this.scene.add.graphics().setDepth(48);
+        let elapsed = 0;
+        const pull = this.scene.time.addEvent({
+          delay: 16, loop: true,
+          callback: () => {
+            elapsed += 16;
+            if (!e.active || !e.body) {
+              pull.destroy();
+              if (g.active) g.destroy();
+              return;
+            }
+            g.clear();
+            g.lineStyle(6, 0xccffaa, 0.12);
+            g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
+            g.lineStyle(1.5, 0xeeffdd, 0.85);
+            g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
+            if (e.active && e.body) {
+              const a = Phaser.Math.Angle.Between(e.x, e.y, player.x, player.y);
+              e.body.setVelocity(Math.cos(a) * 220, Math.sin(a) * 220);
+            }
+            if (elapsed >= 550) {
+              pull.destroy();
+              if (g.active) g.destroy();
+              if (e.active) {
+                damageEnemy.call(this.scene, e, 9.0);
+                if (e.active) {
+                  const slashArc = this.scene.add.arc(e.x, e.y, 70, -100, 100, false, 0xccffaa, 0.2)
+                    .setStrokeStyle(7, 0xccffaa, 0.7).setDepth(28);
+                  this.scene.tweens.add({
+                    targets: slashArc, alpha: 0, scale: 1.2, duration: 200,
+                    onComplete: () => slashArc.destroy(),
+                  });
+                }
+              }
+            }
+          },
+        });
+      });
     });
   }
 
@@ -4545,14 +4585,11 @@ class DeathScytheWeapon extends FusionWeapon {
     this.lastWhirl = 0;
   }
 
+  // 수정
   tick(time) {
-    // ── 사신의 낫 휘두르기 (1300ms) ───────────────────────
     if (this.canFire(time, 1300)) {
       this.lastFire = time;
-      // 2회 연속 베기 (대낫 Lv3)
-      [0, 260].forEach((delay) => {
-        this.scene.time.delayedCall(delay, () => this.swing(time));
-      });
+      this.swing(time);  // 1회만
     }
 
     // ── 체인 (체인 전체, 1800ms) ──────────────────────────
@@ -4568,52 +4605,45 @@ class DeathScytheWeapon extends FusionWeapon {
     }
   }
 
-  // 수정
   swing(time) {
-    const target = findNearestEnemy();
     const range = 250;
-    const baseAngle = target
-      ? Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y)
-      : this.swingAngle;
-    this.swingAngle = baseAngle;
+    const savedAngle = lastMoveAngle - Math.PI * 0.75;
 
-    // ── 낫 이미지 스핀 이펙트 ──────────────────────────────
     const scythe = this.scene.add.image(player.x, player.y, "death-scythe")
       .setDisplaySize(range * 2.2, range * 2.2)
       .setDepth(29)
-      .setAlpha(0.92)
-      .setOrigin(0.5, 0.5);
+      .setAlpha(1)
+      .setOrigin(0.15, 0.85)
+      .setRotation(savedAngle);
 
-    // 잔상 3개
-    for (let i = 1; i <= 3; i++) {
-      const ghost = this.scene.add.image(player.x, player.y, "death-scythe")
-        .setDisplaySize(range * 2.2, range * 2.2)
-        .setDepth(28)
-        .setAlpha(0.18 * (4 - i))
-        .setOrigin(0.5, 0.5)
-        .setTint(0xccffaa);
+    const startTime = this.scene.time.now;
+    const duration = 900;
 
-      this.scene.tweens.add({
-        targets: ghost,
-        rotation: baseAngle + Math.PI * 2,
-        alpha: 0,
-        duration: 520 + i * 80,
-        ease: "Cubic.easeOut",
-        onComplete: () => ghost.destroy(),
-      });
-    }
+    let followTimer = this.scene.time.addEvent({
+      delay: 16,
+      loop: true,
+      callback: () => {
+        if (!scythe.active) { followTimer.destroy(); return; }
+        scythe.setPosition(player.x, player.y);
+        // 수정
+        const elapsed = this.scene.time.now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        // 시작 느림 → 중간 빠름 → 끝 감속 (ease in-out with fast middle)
+        const eased = easeSwing(progress);
+        scythe.setRotation(savedAngle + Math.PI * 2 * eased);
 
-    // 메인 낫 360도 회전
-    this.scene.tweens.add({
-      targets: scythe,
-      rotation: baseAngle + Math.PI * 2,
-      alpha: 0,
-      duration: 520,
-      ease: "Cubic.easeOut",
-      onComplete: () => scythe.destroy(),
+        if (progress >= 1) {
+          followTimer.destroy();
+          this.scene.tweens.add({
+            targets: scythe,
+            alpha: 0,
+            duration: 150,
+            onComplete: () => scythe.destroy(),
+          });
+        }
+      },
     });
 
-    // 외곽 링 이펙트
     const ring = this.scene.add.circle(player.x, player.y, range, 0xccffaa, 0)
       .setStrokeStyle(3, 0xccffaa, 0.6)
       .setDepth(27);
@@ -4626,12 +4656,10 @@ class DeathScytheWeapon extends FusionWeapon {
       onComplete: () => ring.destroy(),
     });
 
-    // 히트 판정 — 360도 전방위
     findEnemiesInRange(player.x, player.y, range).forEach((e) => {
       damageEnemy.call(this.scene, e, 11.0);
     });
 
-    // 체인 끌어당기기 (범위 밖 적)
     const hitEnemies = new Set(findEnemiesInRange(player.x, player.y, range));
     const chainTargets = findEnemiesInRange(player.x, player.y, 520, 5)
       .filter((e) => !hitEnemies.has(e));
@@ -5004,4 +5032,19 @@ function showWarningText() {
     delay: 1000,
     onComplete: () => sub.destroy(),
   });
+}
+
+function easeSwing(t) {
+  // 0~0.2 : 천천히 시작
+  // 0.2~0.75 : 빠르게 휭
+  // 0.75~1.0 : 감속
+  if (t < 0.2) {
+    return 0.5 * Math.pow(t / 0.2, 2) * 0.15;
+  } else if (t < 0.75) {
+    const mid = (t - 0.2) / 0.55;
+    return 0.15 + mid * 0.72;
+  } else {
+    const end = (t - 0.75) / 0.25;
+    return 0.87 + (1 - Math.pow(1 - end, 2)) * 0.13;
+  }
 }
