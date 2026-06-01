@@ -234,6 +234,7 @@ function update(time, delta) {
 
   enemies.getChildren().forEach((enemy) => {
     if (!enemy.active || !enemy.body) return;
+    if (enemy.frozen) return;
 
     // 괴물의 꿈: 도망 중인 적
     if (enemy.fleeing) {
@@ -393,15 +394,31 @@ class PathManager {
     if (!this.chosenPath) return;
 
     // 시간 정지 종료 체크
-    if (this.timeStopActive && time > this.timeStopUntil) {
-      this.timeStopActive = false;
-      this.scene.physics.resume();
-      spawnTimer.paused = false;
-      enemyHealthTimer.paused = false;
-      enemySpawnGrowthTimer.paused = false;
-      weaponManager.timeStopped = false;
-      showTimeStopEnd(this.scene);
+if (this.timeStopActive && time > this.timeStopUntil) {
+  this.timeStopActive = false;
+
+  enemies.getChildren().forEach((e) => {
+    if (!e.active || !e.body) return;
+    e.body.moves = true;
+    e.frozen = false;
+  });
+
+  bullets.getChildren().forEach((b) => {
+    if (!b.active || !b.body) return;
+    b.body.moves = true;
+    b.frozen = false;
+    if (b._frozenVelocity) {
+      b.body.setVelocity(b._frozenVelocity.x, b._frozenVelocity.y);
+      b._frozenVelocity = null;
     }
+  });
+
+  spawnTimer.paused = false;
+  enemyHealthTimer.paused = false;
+  enemySpawnGrowthTimer.paused = false;
+
+  showTimeStopEnd(this.scene);
+}
 
     // 백경무예 무적 해제
     if (this.baekInvincible && time > this.baekInvincibleUntil) {
@@ -428,6 +445,11 @@ class PathManager {
     if (this.hasSkill("dragonBreath") && time > this.lastBreath + this.breathCooldown) {
       this.lastBreath = time;
       this.fireBreath();
+    }
+
+    if (this.hasSkill("dragonEternal") && !this.timeStopActive && 
+    time > this.lastEternal + this.eternalCooldown) {
+  this.triggerEternal(time);
     }
 
     // ── 괴물의 길 스킬 틱 ───────────────────────────────
@@ -504,24 +526,41 @@ class PathManager {
   }
 
   // 영원불멸 발동 (UI 버튼 또는 키로 트리거)
-  triggerEternal(time) {
-    if (!this.hasSkill("dragonEternal")) return;
-    if (this.timeStopActive) return;
-    if (time < this.lastEternal + this.eternalCooldown) return;
-    this.lastEternal = time;
-    this.timeStopActive = true;
-    this.timeStopUntil = time + 10000;
+// triggerEternal 함수 전체 교체
+triggerEternal(time) {
+  if (!this.hasSkill("dragonEternal")) return;
+  if (this.timeStopActive) return;
+  if (time < this.lastEternal + this.eternalCooldown) return;
 
-    // 물리 일시정지 (플레이어 제외)
-    this.scene.physics.pause();
-    player.body.enable = true; // 플레이어 물리 재활성
-    spawnTimer.paused = true;
-    enemyHealthTimer.paused = true;
-    enemySpawnGrowthTimer.paused = true;
-    weaponManager.timeStopped = true;
+  this.lastEternal = time;
+  this.timeStopActive = true;
+  this.timeStopUntil = time + 10000;
 
-    showTimeStopStart(this.scene);
-  }
+  // physics.pause() 대신 적들만 개별 정지
+  enemies.getChildren().forEach((e) => {
+    if (!e.active || !e.body) return;
+    e._frozenVelocity = { x: e.body.velocity.x, y: e.body.velocity.y };
+    e.body.setVelocity(0, 0);
+    e.body.moves = false;   // 물리 이동 비활성
+    e.frozen = true;
+  });
+
+  // 투사체도 정지
+  bullets.getChildren().forEach((b) => {
+    if (!b.active || !b.body) return;
+    b._frozenVelocity = { x: b.body.velocity.x, y: b.body.velocity.y };
+    b.body.setVelocity(0, 0);
+    b.body.moves = false;
+    b.frozen = true;
+  });
+
+  spawnTimer.paused = true;
+  enemyHealthTimer.paused = true;
+  enemySpawnGrowthTimer.paused = true;
+  weaponManager.timeStopped = false;  // 무기는 계속 발동
+
+  showTimeStopStart(this.scene);
+}
 
   // 시해
   triggerShed(time) {
@@ -2037,7 +2076,7 @@ function showStartScreen() {
   const sub = this.add.text(cx, cy + 44, "어둠 속을 걸어라", { fontSize: "16px", color: "#7ecfc0", letterSpacing: 4 }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
   const btnBg = this.add.rectangle(cx, cy + 108, 200, 48, 0x00ffd5, 0.12).setStrokeStyle(1.5, 0x00ffd5, 0.75).setScrollFactor(0).setDepth(9002).setInteractive({ useHandCursor: true });
   const btnText = this.add.text(cx, cy + 108, "ENTER THE ABYSS", { fontSize: "15px", color: "#00ffd5", fontStyle: "bold", letterSpacing: 3 }).setOrigin(0.5).setScrollFactor(0).setDepth(9003).setInteractive({ useHandCursor: true });
-  const hint = this.add.text(cx, cy + 164, "WASD / 조이스틱으로 이동  |  E: 영원불멸(용의 길)", { fontSize: "12px", color: "#446060" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const hint = this.add.text(cx, cy + 164, "WASD / 조이스틱으로 이동", { fontSize: "12px", color: "#446060" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
 
   objs.push(bg, lineTop, title1, title2, lineBot, sub, btnBg, btnText, hint);
   this.tweens.add({ targets: [btnBg, btnText], alpha: { from: 0.6, to: 1 }, duration: 900, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
@@ -2048,12 +2087,11 @@ function showStartScreen() {
     this.physics.resume(); spawnTimer.paused = false; enemyHealthTimer.paused = false; enemySpawnGrowthTimer.paused = false;
     isChoosingWeapon = false; gameStartTime = this.time.now;
 
-    // 영원불멸 E 키 바인딩
-    const eKey = this.input.keyboard.addKey("E");
-    eKey.on("down", () => { if (pathManager) pathManager.triggerEternal(this.time.now); });
   };
-  btnBg.on("pointerdown", startGame); btnText.on("pointerdown", startGame);
+
+btnBg.on("pointerdown", startGame); btnText.on("pointerdown", startGame);
 }
+
 
 function showBloodEffect(x, y) {
   const centerX = x, centerY = y + 20;
@@ -2270,4 +2308,5 @@ function easeSwing(t) {
   if (t < 0.2) return 0.5 * Math.pow(t / 0.2, 2) * 0.15;
   else if (t < 0.75) return 0.15 + ((t - 0.2) / 0.55) * 0.72;
   else return 0.87 + (1 - Math.pow(1 - (t - 0.75) / 0.25, 2)) * 0.13;
+
 }
