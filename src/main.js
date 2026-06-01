@@ -384,7 +384,7 @@ class SkullWeapon extends AutoWeapon {
     this.showSkullEffect(radius);
     findEnemiesInRange(player.x, player.y, radius).forEach((enemy) => {
       enemy.stunnedUntil = time + stunDuration;
-      enemy.setFillStyle(0xcc99ff);
+      enemy.setTint(0xcc99ff);
       const stacks = this.level >= 5 ? 2 : 1;
       enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, time + poisonDuration * stacks);
       enemy.poisonDamage = getWeaponDamage(this.type, this.level) * 0.3;
@@ -1026,7 +1026,7 @@ e.setTint(0xff9966);   // 둔화
       } else {
         e.slowed = true;
         this.gazeStacks.set(e, stacks);
-        e.setFillStyle(0xff9966);
+        e.setTint(0xff9966);
         showGazeSlow(this.scene, e.x, e.y);
       }
     });
@@ -1798,32 +1798,26 @@ function damageEnemy(enemy, amount = 1) {
   // 만상무예 카운트
   if (pathManager) pathManager.countAttack();
 
-  if (enemy.hp <= 0) {
-    // 죽기 애니메이션 재생 후 제거
-    enemy.play("enemy_die");
-    enemy.once("animationcomplete", () => {
-      showDeathBurst.call(this, enemy.x, enemy.y);
-      spawnExpOrb.call(this, enemy.x, enemy.y);
-      enemy.destroy();
-    });
-    enemies.remove(enemy);  // 죽는 동안 중복 피해 방지
-     enemy.body.setVelocity(0, 0);
+  // 변경 후 — 깔끔하게 단일 처리
+if (enemy.hp <= 0) {
+    enemies.remove(enemy);
+    enemy.body.setVelocity(0, 0);
     enemy.body.moves = false;
 
-    if (this.anims.exists("enemy_die") && enemy.play) {
-      enemy.play("enemy_die");
-      enemy.once("animationcomplete", () => {
+    if (enemy.anims) {
+        enemy.play("enemy_die");
+        enemy.once("animationcomplete", () => {
+            showDeathBurst.call(this, enemy.x, enemy.y);
+            spawnExpOrb.call(this, enemy.x, enemy.y);
+            enemy.destroy();
+        });
+    } else {
         showDeathBurst.call(this, enemy.x, enemy.y);
         spawnExpOrb.call(this, enemy.x, enemy.y);
         enemy.destroy();
-      });
-    } else {
-      showDeathBurst.call(this, enemy.x, enemy.y);
-      spawnExpOrb.call(this, enemy.x, enemy.y);
-      enemy.destroy();
     }
     return;
-  }
+}
 
   // 피격 후 tint 복구
   this.time.delayedCall(120, () => {
