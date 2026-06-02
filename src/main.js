@@ -684,6 +684,12 @@ function preload() {
   this.load.spritesheet("enemy_walk", "assets/Skeleton_01_White_Walk.png", {
     frameWidth: 96, frameHeight: 64
   });
+  this.load.spritesheet("goblin_walk", "assets/고블린 걸음.png", {
+    frameWidth: 150, frameHeight: 150
+  });
+  this.load.spritesheet("bat_move", "assets/박쥐 이동.png", {
+    frameWidth: 150, frameHeight: 150
+  });
   this.load.spritesheet("enemy_die", "assets/Skeleton_01_White_Die.png", {
     frameWidth: 96, frameHeight: 64
   });
@@ -1345,6 +1351,18 @@ function create() {
     key: "enemy_walk",
     frames: this.anims.generateFrameNumbers("enemy_walk", { start: 0, end: 9 }),
     frameRate: 10,
+    repeat: -1
+  });
+  this.anims.create({
+    key: "goblin_walk",
+    frames: this.anims.generateFrameNumbers("goblin_walk", { start: 0, end: 7 }),
+    frameRate: 10,
+    repeat: -1
+  });
+  this.anims.create({
+    key: "bat_move",
+    frames: this.anims.generateFrameNumbers("bat_move", { start: 0, end: 7 }),
+    frameRate: 12,
     repeat: -1
   });
   this.anims.create({
@@ -2482,9 +2500,9 @@ function getWeaponDamage(type, level) {
 
 // ─── 적 스폰 ────────────────────────────────────────────
 const ENEMY_TYPES = {
-  normal: { id: "normal", name: "일반", hpMultiplier: 1, tint: null, displaySize: 64, speed: 95, fleeSpeed: 130, slowedSpeed: 45 },
-  goblin: { id: "goblin", name: "고블린", hpMultiplier: 2, tint: 0x77ff66, displaySize: 72, speed: 88, fleeSpeed: 120, slowedSpeed: 42 },
-  bat: { id: "bat", name: "박쥐", hpMultiplier: 1.1, tint: 0x99aaff, displaySize: 52, speed: 118, fleeSpeed: 150, slowedSpeed: 55 },
+  normal: { id: "normal", name: "일반", texture: "enemy_walk", anim: "enemy_walk", hpMultiplier: 1, tint: null, displaySize: 64, speed: 95, fleeSpeed: 130, slowedSpeed: 45 },
+  goblin: { id: "goblin", name: "고블린", texture: "goblin_walk", anim: "goblin_walk", hpMultiplier: 2, tint: null, displaySize: 252, speed: 88, fleeSpeed: 120, slowedSpeed: 42 },
+  bat: { id: "bat", name: "박쥐", texture: "bat_move", anim: "bat_move", hpMultiplier: 1.1, tint: null, displaySize: 182, bodyScale: 0.93, speed: 118, fleeSpeed: 150, slowedSpeed: 55 },
 };
 
 function getCurrentSurvivalSeconds() {
@@ -2516,7 +2534,7 @@ function spawnEnemy() {
   const x = player.x + Math.cos(angle) * distance;
   const y = player.y + Math.sin(angle) * distance;
   const enemyType = chooseEnemyType();
-  const enemy = this.physics.add.sprite(x, y, "enemy_walk");
+  const enemy = this.physics.add.sprite(x, y, enemyType.texture);
   enemy.enemyType = enemyType.id;
   enemy.enemyName = enemyType.name;
   enemy.hpMultiplier = enemyType.hpMultiplier;
@@ -2525,8 +2543,12 @@ function spawnEnemy() {
   enemy.slowedSpeed = enemyType.slowedSpeed;
   enemy.baseTint = enemyType.tint;
   enemy.setDisplaySize(enemyType.displaySize, enemyType.displaySize);
+  if (enemyType.bodyScale && enemy.body) {
+    const bodySize = enemyType.displaySize * enemyType.bodyScale;
+    enemy.body.setSize(bodySize, bodySize);
+  }
   if (enemyType.tint) enemy.setTint(enemyType.tint);
-  enemy.play("enemy_walk");
+  enemy.play(enemyType.anim);
 
   if (player.x < enemy.x) {
   enemy.setFlipX(true);  // 플레이어가 왼쪽에 있으면 뒤집기
