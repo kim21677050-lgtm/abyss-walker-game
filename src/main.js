@@ -1,6 +1,14 @@
 import Phaser from "phaser";
 
 const MAX_ENEMIES = 250;
+const INITIAL_ENEMY_COUNT = 12;
+const INITIAL_SPAWN_DELAY = 420;
+const MIN_SPAWN_DELAY = 130;
+const BASE_ENEMY_SPAWN_PER_WAVE = 0.35;
+const ENEMY_HEALTH_FLAT_INTERVAL = 45000;
+const ENEMY_HEALTH_FLAT_INCREASE = 5;
+const ENEMY_HEALTH_GROWTH_INTERVAL = 120000;
+const ENEMY_HEALTH_GROWTH_MULTIPLIER = 1.15;
 const PATH_SELECT_LEVEL = 15; // 길 선택 레벨
 
 // ═══════════════════════════════════════════════════════
@@ -119,7 +127,7 @@ let player, cursors, enemies, bullets, expOrbs;
 let exp = 0, level = 1, expToNextLevel = 5;
 let levelText, expInfoText, weaponText, levelUpText = null;
 let weaponManager, pathManager;
-let spawnTimer, enemyHealthTimer, enemySpawnGrowthTimer;
+let spawnTimer, enemyHealthTimer, enemyHealthPercentTimer, enemySpawnGrowthTimer;
 let isChoosingWeapon = false;
 let enemyMaxHp = 3, enemySpawnBonus = 0;
 let elapsedSeconds = 0, enemySpawnRemainder = 0;
@@ -178,15 +186,15 @@ function setInternalSurvivalTime(seconds) {
   const targetSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
   gameStartTime = gameSceneRef.time.now - targetSeconds * 1000;
   elapsedSeconds = Math.floor(targetSeconds / 10) * 10;
-  enemyMaxHp = 3 + Math.floor(targetSeconds / 45) * 5;
+  enemyMaxHp = getEnemyMaxHpAtTime(targetSeconds);
   enemySpawnBonus = 0;
   for (let t = 10; t <= elapsedSeconds; t += 10) {
-    enemySpawnBonus += 0.12 + t * 0.004;
+    enemySpawnBonus += getEnemySpawnGrowthRate(t);
   }
   enemySpawnRemainder = 0;
 
   if (spawnTimer) {
-    spawnTimer.delay = Math.max(120, 250 - elapsedSeconds * 1.2);
+    spawnTimer.delay = getEnemySpawnDelay(elapsedSeconds);
   }
   enemies?.getChildren().forEach((enemy) => {
     if (!enemy.active) return;
@@ -212,7 +220,34 @@ function getExpRequirementForLevel(targetLevel) {
 }
 
 function getNextExpIncrease(currentRequirement) {
-  return Math.max(5, Math.floor(currentRequirement * 0.2 + 0.2));
+  return Math.max(10, Math.floor(currentRequirement * 0.2 + 0.2));
+}
+
+function getEnemySpawnGrowthRate(seconds) {
+  return 0.08 + seconds * 0.0035;
+}
+
+function getEnemySpawnDelay(seconds) {
+  return Math.max(MIN_SPAWN_DELAY, INITIAL_SPAWN_DELAY - seconds * 1.1);
+}
+
+function getEnemyMaxHpAtTime(seconds) {
+  let hp = 3;
+  const flatIntervalSeconds = ENEMY_HEALTH_FLAT_INTERVAL / 1000;
+  const percentIntervalSeconds = ENEMY_HEALTH_GROWTH_INTERVAL / 1000;
+  let nextFlat = flatIntervalSeconds;
+  let nextPercent = percentIntervalSeconds;
+
+  while (nextFlat <= seconds || nextPercent <= seconds) {
+    if (nextFlat <= nextPercent) {
+      hp += ENEMY_HEALTH_FLAT_INCREASE;
+      nextFlat += flatIntervalSeconds;
+    } else {
+      hp = Math.ceil(hp * ENEMY_HEALTH_GROWTH_MULTIPLIER);
+      nextPercent += percentIntervalSeconds;
+    }
+  }
+  return hp;
 }
 
 function setDevLevel(targetLevel, queueChoice = true) {
@@ -966,10 +1001,11 @@ function create() {
   weaponManager = new WeaponManager(this);
   pathManager = new PathManager(this);        // ← 길 매니저
 
-  for (let i = 0; i < 50; i++) spawnEnemy.call(this);
+  for (let i = 0; i < INITIAL_ENEMY_COUNT; i++) spawnEnemy.call(this);
 
-  spawnTimer = this.time.addEvent({ delay: 250, callback: () => spawnEnemyWave.call(this), loop: true });
-  enemyHealthTimer = this.time.addEvent({ delay: 45000, callback: () => increaseEnemyMaxHp.call(this), loop: true });
+  spawnTimer = this.time.addEvent({ delay: INITIAL_SPAWN_DELAY, callback: () => spawnEnemyWave.call(this), loop: true });
+  enemyHealthTimer = this.time.addEvent({ delay: ENEMY_HEALTH_FLAT_INTERVAL, callback: () => increaseEnemyMaxHp.call(this), loop: true });
+  enemyHealthPercentTimer = this.time.addEvent({ delay: ENEMY_HEALTH_GROWTH_INTERVAL, callback: () => increaseEnemyMaxHpPercent.call(this), loop: true });
   enemySpawnGrowthTimer = this.time.addEvent({ delay: 10000, callback: () => increaseEnemySpawnAmount.call(this), loop: true });
 
   this.physics.add.overlap(bullets, enemies, handleBulletHit, null, this);
@@ -1192,7 +1228,7 @@ class PathManager {
       .setStrokeStyle(6, 0xff8800, 0.9).setDepth(80);
     const glow = this.scene.add.circle(player.x, player.y, radius * 0.7, 0xffcc44, 0.18).setDepth(79);
     this.scene.tweens.add({ targets: [ring, glow], alpha: 0, scale: 1.3, duration: 500, onComplete: () => { ring.destroy(); glow.destroy(); } });
-    explode.call(this.scene, player.x, player.y, radius, 18.0);
+    explode.call(this.scene, player.x, player.y, radius, 18.0, { countAttack: false });
 
     const text = makeText(this.scene, player.x, player.y - 60, "만상무예!", {
   fontSize: "26px", color: "#ff8800", fontStyle: "bold",
@@ -1224,7 +1260,7 @@ if (this.timeStopActive && time > this.timeStopUntil) {
   });
 
   spawnTimer.paused = false;
-  enemyHealthTimer.paused = false;
+  enemyHealthTimer.paused = false; enemyHealthPercentTimer.paused = false;
   enemySpawnGrowthTimer.paused = false;
 
   showTimeStopEnd(this.scene);
@@ -1366,7 +1402,7 @@ triggerEternal(time) {
   });
 
   spawnTimer.paused = true;
-  enemyHealthTimer.paused = true;
+  enemyHealthTimer.paused = true; enemyHealthPercentTimer.paused = true;
   enemySpawnGrowthTimer.paused = true;
   weaponManager.timeStopped = false;  // 무기는 계속 발동
 
@@ -1963,7 +1999,7 @@ function pauseGameplay() {
   player.body.setVelocity(0, 0);
   this.physics.pause();
   spawnTimer.paused = true;
-  enemyHealthTimer.paused = true;
+  enemyHealthTimer.paused = true; enemyHealthPercentTimer.paused = true;
   enemySpawnGrowthTimer.paused = true;
 }
 
@@ -1971,7 +2007,7 @@ function resumeGameplay() {
   isChoosingWeapon = false;
   this.physics.resume();
   spawnTimer.paused = false;
-  enemyHealthTimer.paused = false;
+  enemyHealthTimer.paused = false; enemyHealthPercentTimer.paused = false;
   enemySpawnGrowthTimer.paused = false;
 }
 
@@ -2103,27 +2139,42 @@ function spawnEnemy() {
 function spawnEnemyWave() {
   const current = enemies.getLength();
   if (current >= MAX_ENEMIES) return;
-  enemySpawnRemainder += 1 + enemySpawnBonus;
+  enemySpawnRemainder += BASE_ENEMY_SPAWN_PER_WAVE + enemySpawnBonus;
   const spawnCount = Math.min(Math.floor(enemySpawnRemainder), MAX_ENEMIES - current);
   enemySpawnRemainder -= Math.floor(enemySpawnRemainder);
   for (let i = 0; i < spawnCount; i++) spawnEnemy.call(this);
 }
 
 function increaseEnemyMaxHp() {
-  enemyMaxHp += 5;
+  enemyMaxHp += ENEMY_HEALTH_FLAT_INCREASE;
   enemies.getChildren().forEach((enemy) => {
     if (!enemy.active) return;
-    enemy.maxHp = (enemy.maxHp || enemyMaxHp - 5) + 5;
-    enemy.hp += 5;
+    enemy.maxHp = (enemy.maxHp || enemyMaxHp - ENEMY_HEALTH_FLAT_INCREASE) + ENEMY_HEALTH_FLAT_INCREASE;
+    enemy.hp = Math.min(enemy.maxHp, enemy.hp + ENEMY_HEALTH_FLAT_INCREASE);
+    showEnemyGrowthPulse.call(this, enemy.x, enemy.y);
+  });
+}
+
+function increaseEnemyMaxHpPercent() {
+  const previousMaxHp = enemyMaxHp;
+  enemyMaxHp = Math.ceil(enemyMaxHp * ENEMY_HEALTH_GROWTH_MULTIPLIER);
+  const globalIncrease = enemyMaxHp - previousMaxHp;
+
+  enemies.getChildren().forEach((enemy) => {
+    if (!enemy.active) return;
+    const previousEnemyMaxHp = enemy.maxHp || previousMaxHp;
+    const nextEnemyMaxHp = Math.ceil(previousEnemyMaxHp * ENEMY_HEALTH_GROWTH_MULTIPLIER);
+    enemy.maxHp = nextEnemyMaxHp;
+    enemy.hp = Math.min(nextEnemyMaxHp, (enemy.hp || 0) + Math.max(1, nextEnemyMaxHp - previousEnemyMaxHp, globalIncrease));
     showEnemyGrowthPulse.call(this, enemy.x, enemy.y);
   });
 }
 
 function increaseEnemySpawnAmount() {
   elapsedSeconds += 10;
-  const growthRate = 0.12 + elapsedSeconds * 0.004;
+  const growthRate = getEnemySpawnGrowthRate(elapsedSeconds);
   enemySpawnBonus += growthRate;
-  const newDelay = Math.max(120, 250 - elapsedSeconds * 1.2);
+  const newDelay = getEnemySpawnDelay(elapsedSeconds);
   spawnTimer.delay = newDelay;
   if (elapsedSeconds % 60 === 0) {
     showWarningText.call(gameSceneRef);
@@ -2150,7 +2201,7 @@ function handleBulletHit(bullet, enemy) {
   bullet.destroy();
 }
 
-function damageEnemy(enemy, amount = 1) {
+function damageEnemy(enemy, amount = 1, options = {}) {
   if (!enemy || !enemy.active) return;
   enemy.hp -= amount;
 
@@ -2160,7 +2211,7 @@ function damageEnemy(enemy, amount = 1) {
   showHitFlash.call(this, enemy.x, enemy.y);
 
   // 만상무예 카운트
-  if (pathManager) pathManager.countAttack();
+  if (options.countAttack !== false && pathManager) pathManager.countAttack();
 
   // 변경 후 — 깔끔하게 단일 처리
 if (enemy.hp <= 0) {
@@ -2207,7 +2258,7 @@ function explode(x, y, radius, damage = 1, options = {}) {
   }
   enemies.getChildren().forEach((enemy) => {
     if (Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y) <= radius) {
-      damageEnemy.call(this, enemy, damage);
+      damageEnemy.call(this, enemy, damage, { countAttack: options?.countAttack ?? false });
       if (options?.poison && enemy.active) {
         enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, this.time.now + 3000);
         enemy.poisonDamage = 0.7; enemy.nextPoisonTick = 0;
@@ -2510,7 +2561,7 @@ function killPlayer() {
 // ─── 시작 화면 ───────────────────────────────────────────
 function showStartScreen() {
   this.physics.pause();
-  spawnTimer.paused = true; enemyHealthTimer.paused = true; enemySpawnGrowthTimer.paused = true;
+  spawnTimer.paused = true; enemyHealthTimer.paused = true; enemyHealthPercentTimer.paused = true; enemySpawnGrowthTimer.paused = true;
   isChoosingWeapon = true;
 
   const W = this.scale.width, H = this.scale.height, cx = W / 2, cy = H / 2;
@@ -2542,7 +2593,7 @@ function showStartScreen() {
 
   const startGame = () => {
     objs.forEach((obj) => obj.destroy());
-    this.physics.resume(); spawnTimer.paused = false; enemyHealthTimer.paused = false; enemySpawnGrowthTimer.paused = false;
+    this.physics.resume(); spawnTimer.paused = false; enemyHealthTimer.paused = false; enemyHealthPercentTimer.paused = false; enemySpawnGrowthTimer.paused = false;
     isChoosingWeapon = false; gameStartTime = this.time.now;
   };
 
