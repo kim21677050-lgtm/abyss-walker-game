@@ -124,14 +124,25 @@ const PATH_SKILLS = {
 // ═══════════════════════════════════════════════════════
 // Phaser 설정
 // ═══════════════════════════════════════════════════════
+function getViewportSize() {
+  const viewport = window.visualViewport;
+  return {
+    width: Math.max(1, Math.round(viewport?.width || document.documentElement.clientWidth || window.innerWidth)),
+    height: Math.max(1, Math.round(viewport?.height || document.documentElement.clientHeight || window.innerHeight)),
+  };
+}
+
+const initialViewport = getViewportSize();
+
 const config = {
   type: Phaser.AUTO,
+  parent: "app",
   backgroundColor: "#111111",
   scale: {
     mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: window.innerWidth,
-    height: window.innerHeight,
+    width: initialViewport.width,
+    height: initialViewport.height,
   },
   physics: {
     default: "arcade",
@@ -140,7 +151,29 @@ const config = {
   scene: { preload, create, update },
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+let viewportSyncRaf = null;
+
+function syncGameViewport() {
+  if (viewportSyncRaf) cancelAnimationFrame(viewportSyncRaf);
+  viewportSyncRaf = requestAnimationFrame(() => {
+    viewportSyncRaf = null;
+    const { width, height } = getViewportSize();
+    game.scale.resize(width, height);
+    if (game.canvas) {
+      game.canvas.style.width = `${width}px`;
+      game.canvas.style.height = `${height}px`;
+    }
+  });
+}
+
+window.addEventListener("resize", syncGameViewport, { passive: true });
+window.addEventListener("orientationchange", () => setTimeout(syncGameViewport, 80), { passive: true });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", syncGameViewport, { passive: true });
+  window.visualViewport.addEventListener("scroll", syncGameViewport, { passive: true });
+}
+setTimeout(syncGameViewport, 0);
 
 // ── 전역 변수 ──────────────────────────────────────────
 let player, cursors, enemies, bullets, expOrbs;
