@@ -149,6 +149,7 @@ let gameStartTime = 0;
 let devMode = false, devPanelEl = null, gameSceneRef = null;
 let devTimeAdjustedThisRun = false;
 let devPendingLevelChoice = false;
+let selectedStartWeaponType = "machineGun";
 let timerText = null, devBtnEl = null, lastMoveAngle = 0;
 let bgChunks = new Map();
 let profilePanelEl = null, rankingPanelEl = null, nicknamePromptEl = null;
@@ -1424,7 +1425,6 @@ expInfoText = makeText(this, this.scale.width - 20, 20, "", { fontSize: "15px", 
   weaponText = makeText(this, 20, 52, "", { fontSize: "16px", color: "#b7f7ff" }).setScrollFactor(0).setDepth(1000);
 
   cursors = this.input.keyboard.addKeys({ up: "W", down: "S", left: "A", right: "D" });
-  weaponManager.addOrUpgrade("machineGun");
   lastHudLevel = null; lastHudExp = null; lastHudExpToNext = null; lastLevelTextLevel = null; lastTimerSecond = -1;
   updateWeaponHud();
   updateExpHud();
@@ -2667,6 +2667,7 @@ if (enemy.hp <= 0) {
 }
 
 function spawnExpOrb(x, y) {
+  if (Math.random() >= 0.75) return;
   const orb = this.add.circle(x, y, 7, 0x66ccff);
   this.physics.add.existing(orb);
   expOrbs.add(orb);
@@ -3002,7 +3003,11 @@ function showStartScreen() {
   const compact = W < 680 || H < 620;
   const scale = responsiveScale(this, 0.78, 1);
   const titleY = compact ? Math.max(112, H * 0.28) : cy - 82;
-  const buttonY = compact ? Math.min(H - 128, titleY + 150 * scale) : cy + 108;
+  const weaponCols = compact ? 3 : 4;
+  const weaponRows = Math.ceil(WEAPON_TYPES.length / weaponCols);
+  const weaponStartY = compact ? titleY + 126 * scale : titleY + 166 * scale;
+  const weaponRowH = compact ? 30 : 34;
+  const buttonY = Math.min(H - 92, weaponStartY + weaponRows * weaponRowH + 34);
   const objs = [];
   const bg = this.add.rectangle(0, 0, W, H, 0x03060a, 0.9).setOrigin(0).setScrollFactor(0).setDepth(9000);
   const vignette = this.add.circle(cx, cy, Math.max(W, H) * 0.58, 0x183348, 0.16).setScrollFactor(0).setDepth(9000);
@@ -3015,6 +3020,43 @@ function showStartScreen() {
   const btnBg = this.add.rectangle(cx, buttonY, btnW, 54, 0x102933, 0.92).setStrokeStyle(2, UI.cyan, 0.85).setScrollFactor(0).setDepth(9002).setInteractive({ useHandCursor: true });
   const btnGlow = this.add.rectangle(cx, buttonY, btnW - 10, 44, UI.cyan, 0.08).setScrollFactor(0).setDepth(9002);
   const btnText = makeText(this, cx, buttonY, "ENTER THE ABYSS", { fontSize: `${compact ? 13 : 15}px`, color: "#48f5d7", fontStyle: "800" }).setOrigin(0.5).setScrollFactor(0).setDepth(9003).setInteractive({ useHandCursor: true });
+  const weaponLabel = makeText(this, cx, weaponStartY - 28, "시작 무기 선택", { fontSize: `${compact ? 12 : 14}px`, color: "#f7fbff", fontStyle: "800" }).setOrigin(0.5).setScrollFactor(0).setDepth(9002);
+  const weaponButtonW = compact ? Math.min(86, (W - 64) / weaponCols) : 112;
+  const weaponButtonH = compact ? 24 : 28;
+  const weaponGap = compact ? 6 : 8;
+  const weaponGridW = weaponCols * weaponButtonW + (weaponCols - 1) * weaponGap;
+  const weaponButtons = [];
+  const refreshWeaponButtons = () => {
+    weaponButtons.forEach(({ bg: weaponBg, text: weaponText, weapon }) => {
+      const selected = weapon.id === selectedStartWeaponType;
+      weaponBg.setFillStyle(selected ? weapon.color : 0x07131e, selected ? 0.28 : 0.74);
+      weaponBg.setStrokeStyle(selected ? 2 : 1, selected ? weapon.color : 0x315566, selected ? 0.95 : 0.55);
+      weaponText.setColor(selected ? hexColor(weapon.color) : "#b7c9d8");
+    });
+  };
+
+  WEAPON_TYPES.forEach((weapon, index) => {
+    const col = index % weaponCols;
+    const row = Math.floor(index / weaponCols);
+    const wx = cx - weaponGridW / 2 + weaponButtonW / 2 + col * (weaponButtonW + weaponGap);
+    const wy = weaponStartY + row * weaponRowH;
+    const weaponBg = this.add.rectangle(wx, wy, weaponButtonW, weaponButtonH, 0x07131e, 0.74)
+      .setScrollFactor(0).setDepth(9002).setInteractive({ useHandCursor: true });
+    const weaponText = makeText(this, wx, wy, `${weapon.icon} ${weapon.name}`, {
+      fontSize: `${compact ? 10 : 11}px`, color: "#b7c9d8", fontStyle: "800",
+      strokeThickness: 2,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(9003).setInteractive({ useHandCursor: true });
+    const selectWeapon = () => {
+      selectedStartWeaponType = weapon.id;
+      refreshWeaponButtons();
+    };
+    weaponBg.on("pointerdown", selectWeapon);
+    weaponText.on("pointerdown", selectWeapon);
+    weaponButtons.push({ bg: weaponBg, text: weaponText, weapon });
+    objs.push(weaponBg, weaponText);
+  });
+  refreshWeaponButtons();
+  objs.push(weaponLabel);
   const hint = makeText(this, cx, Math.min(H - 44, buttonY + 68), "WASD / 조이스틱으로 이동", { fontSize: "12px", color: "#b7c9d8" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
 
   objs.push(bg, vignette, lineTop, title1, title2, lineBot, sub, btnBg, btnGlow, btnText, hint);
@@ -3036,6 +3078,9 @@ function showStartScreen() {
     profilePanelEl = null;
     rankingPanelEl = null;
     objs.forEach((obj) => obj.destroy());
+    weaponManager.weapons = [];
+    weaponManager.addOrUpgrade(selectedStartWeaponType);
+    updateWeaponHud();
     this.physics.resume(); spawnTimer.paused = false; enemyHealthTimer.paused = false; enemyHealthPercentTimer.paused = false; enemySpawnGrowthTimer.paused = false;
     isChoosingWeapon = false; gameStartTime = this.time.now; devTimeAdjustedThisRun = false;
   };
