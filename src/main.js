@@ -1349,21 +1349,6 @@ class ScytheWeapon extends AutoWeapon {
     const ring = this.scene.add.circle(player.x, player.y, range, 0xccffaa, 0).setStrokeStyle(3, 0xccffaa, 0.35).setDepth(27);
     this.scene.tweens.add({ targets: ring, alpha: 0, scale: 1.15, duration: 400, ease: "Cubic.easeOut", onComplete: () => ring.destroy() });
 
-    findEnemiesInRange(player.x, player.y, 520, 5).forEach((e, i) => {
-      this.scene.time.delayedCall(i * 70, () => {
-        if (!e.active || !e.body) return;
-        const g = this.scene.add.graphics().setDepth(48);
-        let elapsed = 0;
-        const pull = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
-          elapsed += 16;
-          if (!e.active || !e.body) { pull.destroy(); if (g.active) g.destroy(); return; }
-          g.clear();
-          g.lineStyle(1.5, 0xeeffdd, 0.85); g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
-          if (e.active && e.body) { const a = Phaser.Math.Angle.Between(e.x, e.y, player.x, player.y); e.body.setVelocity(Math.cos(a) * 220, Math.sin(a) * 220); }
-          if (elapsed >= 550) { pull.destroy(); if (g.active) g.destroy(); }
-        }});
-      });
-    });
   }
   spawnWhirlwind() {
     const duration = 1800, hitCooldown = new Map();
