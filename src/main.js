@@ -2777,10 +2777,63 @@ function pullExpOrbs() {
 
 function showLevelUpText() {
   if (levelUpText) levelUpText.destroy();
-  levelUpText = this.add.text(player.x, player.y - 50, `LEVEL UP! Lv.${level}`, {
-    fontSize: "20px", color: "#00ff00",
-  }).setDepth(100);
-  this.time.delayedCall(1000, () => { if (levelUpText) { levelUpText.destroy(); levelUpText = null; } });
+
+  const x = player.x;
+  const y = player.y;
+  const burst = this.add.container(x, y).setDepth(260);
+  levelUpText = burst;
+
+  const shockwave = this.add.circle(0, 0, 34, 0x4dd8ff, 0)
+    .setStrokeStyle(7, 0x77e7ff, 0.95);
+  const innerWave = this.add.circle(0, 0, 16, 0xb8f7ff, 0)
+    .setStrokeStyle(3, 0xdffbff, 0.75);
+  const glow = this.add.circle(0, 0, 70, 0x27b8ff, 0.18);
+  const flash = this.add.circle(0, 0, 18, 0xe6ffff, 0.62);
+
+  const title = makeText(this, 0, -86, "레벨업", {
+    fontSize: "34px",
+    color: "#bff7ff",
+    fontStyle: "900",
+    stroke: "#05243a",
+    strokeThickness: 6,
+  }).setOrigin(0.5);
+  const sub = makeText(this, 0, -48, `Lv.${level}`, {
+    fontSize: "18px",
+    color: "#ffffff",
+    fontStyle: "900",
+    stroke: "#075d82",
+    strokeThickness: 4,
+  }).setOrigin(0.5);
+
+  burst.add([glow, shockwave, innerWave, flash, title, sub]);
+
+  for (let i = 0; i < 18; i++) {
+    const angle = (i / 18) * Math.PI * 2 + Phaser.Math.FloatBetween(-0.08, 0.08);
+    const spark = this.add.circle(0, 0, Phaser.Math.Between(2, 4), i % 3 === 0 ? 0xffffff : 0x66dcff, 0.95);
+    burst.add(spark);
+    this.tweens.add({
+      targets: spark,
+      x: Math.cos(angle) * Phaser.Math.Between(70, 145),
+      y: Math.sin(angle) * Phaser.Math.Between(70, 145),
+      alpha: 0,
+      scale: 0.15,
+      duration: Phaser.Math.Between(420, 680),
+      ease: "Cubic.easeOut",
+    });
+  }
+
+  this.tweens.add({ targets: shockwave, scale: 4.2, alpha: 0, duration: 680, ease: "Cubic.easeOut" });
+  this.tweens.add({ targets: innerWave, scale: 2.8, alpha: 0, duration: 520, delay: 70, ease: "Cubic.easeOut" });
+  this.tweens.add({ targets: glow, scale: 2.4, alpha: 0, duration: 620, ease: "Sine.easeOut" });
+  this.tweens.add({ targets: flash, scale: 3.5, alpha: 0, duration: 280, ease: "Quad.easeOut" });
+  this.tweens.add({ targets: [title, sub], y: "-=22", alpha: 0, duration: 850, delay: 520, ease: "Cubic.easeIn" });
+  this.tweens.add({ targets: player, scaleX: 1.12, scaleY: 1.12, duration: 90, yoyo: true, ease: "Quad.easeOut" });
+
+  this.cameras.main.flash(130, 80, 210, 255, false);
+  this.time.delayedCall(1450, () => {
+    if (levelUpText === burst) levelUpText = null;
+    if (burst.active) burst.destroy(true);
+  });
 }
 
 function pauseGameplay() {
