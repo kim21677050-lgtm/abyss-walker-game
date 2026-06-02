@@ -12,10 +12,16 @@ const ENEMY_HEALTH_GROWTH_MULTIPLIER = 1.15;
 const SPECIAL_ENEMY_START_SECONDS = 300;
 const SPECIAL_ENEMY_INITIAL_RATE = 0.15;
 const SPECIAL_ENEMY_RATE_PER_MINUTE = 0.02;
+const PLAYER_BASE_CRIT_CHANCE = 0.05;
+const PLAYER_CRIT_DAMAGE_MULTIPLIER = 5;
 const PATH_SELECT_LEVEL = 15; // 길 선택 레벨
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://aezpthrsvtatfonhtvlo.supabase.co";
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_E_uydK1TiiUidl2z507RCQ_wOJ-xy9C";
 const SCORE_TABLE = "abyss_scores";
+const CHAT_TABLE = "abyss_chat_messages";
+const CHAT_MAX_MESSAGES = 50;
+const CHAT_POLL_INTERVAL = 5000;
+const DEV_CHAT_COMMAND = "/개발자모드";
 const PROFILE_STORAGE_KEY = "abyssWalker.playerProfile";
 const BEST_RECORD_STORAGE_KEY = "abyssWalker.bestRecord";
 
@@ -160,6 +166,7 @@ let passiveLevels = {};
 let timerText = null, devBtnEl = null, lastMoveAngle = 0;
 let bgChunks = new Map();
 let profilePanelEl = null, rankingPanelEl = null, nicknamePromptEl = null;
+let chatPanelEl = null, chatMessagesEl = null, chatInputEl = null, chatStatusEl = null, chatPollTimer = null;
 let lastBgChunkX = null, lastBgChunkY = null;
 let lastHudLevel = null, lastHudExp = null, lastHudExpToNext = null, lastLevelTextLevel = null, lastTimerSecond = -1;
 const CHUNK_SIZE = 512, CHUNK_RENDER_RADIUS = 3;
@@ -355,6 +362,52 @@ async function fetchLeaderboard(limit = 10) {
   return response.json();
 }
 
+async function fetchChatMessages() {
+  const params = new URLSearchParams({
+    select: "nickname,message,created_at",
+    order: "created_at.desc,id.desc",
+    limit: String(CHAT_MAX_MESSAGES),
+  });
+
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${CHAT_TABLE}?${params.toString()}`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `Chat fetch failed: ${response.status}`);
+  }
+
+  return (await response.json()).reverse();
+}
+
+async function postChatMessage(message) {
+  const profile = getPlayerProfile();
+  if (!profile) throw new Error("Nickname is required.");
+
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/post_abyss_chat_message`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      p_player_id: profile.playerId,
+      p_nickname: profile.nickname,
+      p_message: message,
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `Chat submit failed: ${response.status}`);
+  }
+}
+
 function closeDomPanel(panel) {
   if (panel?.parentNode) panel.parentNode.removeChild(panel);
 }
@@ -499,6 +552,148 @@ async function showLeaderboardPanel() {
   }
 }
 
+function setChatStatus(message, color = "#aeb7c2") {
+  if (!chatStatusEl) return;
+  chatStatusEl.textContent = message;
+  chatStatusEl.style.color = color;
+}
+
+function renderChatMessages(rows = []) {
+  if (!chatMessagesEl) return;
+  chatMessagesEl.innerHTML = "";
+
+  rows.forEach((row) => {
+    const item = document.createElement("div");
+    item.style.cssText = "padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06);line-height:1.35;word-break:break-word;";
+    item.innerHTML = `
+      <span style="color:#6ee7d2;font-weight:900">${escapeHtml(row.nickname || "PLAYER")}</span>
+      <span style="color:#d8deea">${escapeHtml(row.message || "")}</span>
+    `;
+    chatMessagesEl.appendChild(item);
+  });
+
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+}
+
+async function refreshChatMessages() {
+  if (!chatPanelEl) return;
+  try {
+    const rows = await fetchChatMessages();
+    renderChatMessages(rows);
+    setChatStatus(rows.length ? `최근 ${rows.length}개 메시지` : "아직 메시지가 없습니다.");
+  } catch (error) {
+    setChatStatus("채팅 준비 안 됨: Supabase SQL을 먼저 실행하세요.", "#ffb4a8");
+    console.warn("Chat fetch failed", error);
+  }
+}
+
+async function handleChatSubmit() {
+  if (!chatInputEl) return;
+  const message = chatInputEl.value.trim().slice(0, 180);
+  if (!message) return;
+
+  if (message === DEV_CHAT_COMMAND) {
+    chatInputEl.value = "";
+    toggleDevMode();
+    setChatStatus(devMode ? "개발자 모드 ON" : "개발자 모드 OFF", devMode ? "#00ffd5" : "#ffb4a8");
+    return;
+  }
+
+  if (!getPlayerProfile()) {
+    showNicknamePrompt(() => {
+      chatInputEl?.focus();
+    });
+    return;
+  }
+
+  chatInputEl.value = "";
+  setChatStatus("전송 중...");
+  try {
+    await postChatMessage(message);
+    await refreshChatMessages();
+  } catch (error) {
+    setChatStatus("채팅 전송 실패: Supabase SQL을 확인하세요.", "#ffb4a8");
+    console.warn("Chat submit failed", error);
+  }
+}
+
+function createChatPanel() {
+  if (document.getElementById("abyss-chat-panel")) return;
+
+  const panel = document.createElement("div");
+  panel.id = "abyss-chat-panel";
+  panel.style.cssText = "position:fixed;left:12px;bottom:12px;width:min(340px,calc(100vw - 24px));height:250px;z-index:99997;background:rgba(7,11,18,0.9);border:1px solid rgba(110,231,210,0.55);box-shadow:0 14px 34px rgba(0,0,0,0.34);color:#f8fafc;font-family:Arial,'Pretendard','Segoe UI',sans-serif;display:flex;flex-direction:column;";
+
+  const header = document.createElement("button");
+  header.type = "button";
+  header.style.cssText = "height:34px;display:flex;align-items:center;justify-content:space-between;gap:10px;background:rgba(16,41,51,0.84);border:0;border-bottom:1px solid rgba(110,231,210,0.35);color:#6ee7d2;cursor:pointer;padding:0 10px;font-size:12px;font-weight:900;";
+  header.innerHTML = `<span>채팅</span><span id="abyss-chat-toggle">-</span>`;
+
+  const body = document.createElement("div");
+  body.style.cssText = "display:flex;flex:1;min-height:0;flex-direction:column;";
+
+  chatMessagesEl = document.createElement("div");
+  chatMessagesEl.style.cssText = "flex:1;min-height:0;overflow:auto;padding:8px 10px;font-size:12px;";
+
+  chatStatusEl = document.createElement("div");
+  chatStatusEl.style.cssText = "padding:0 10px 6px;font-size:11px;color:#aeb7c2;min-height:16px;";
+  chatStatusEl.textContent = "채팅 불러오는 중...";
+
+  const inputRow = document.createElement("div");
+  inputRow.style.cssText = "display:flex;gap:6px;padding:8px;border-top:1px solid rgba(255,255,255,0.1);";
+
+  chatInputEl = document.createElement("input");
+  chatInputEl.type = "text";
+  chatInputEl.maxLength = 180;
+  chatInputEl.placeholder = "메시지 입력...";
+  chatInputEl.style.cssText = "flex:1;min-width:0;background:#0f1723;border:1px solid rgba(110,231,210,0.45);color:#fff;padding:8px 9px;font-size:13px;outline:none;";
+
+  const sendBtn = document.createElement("button");
+  sendBtn.type = "button";
+  sendBtn.textContent = "전송";
+  sendBtn.style.cssText = "background:#102933;border:1px solid #6ee7d2;color:#6ee7d2;padding:0 10px;font-size:12px;font-weight:900;cursor:pointer;";
+
+  inputRow.appendChild(chatInputEl);
+  inputRow.appendChild(sendBtn);
+  body.appendChild(chatMessagesEl);
+  body.appendChild(chatStatusEl);
+  body.appendChild(inputRow);
+  panel.appendChild(header);
+  panel.appendChild(body);
+  document.body.appendChild(panel);
+
+  chatPanelEl = panel;
+  let collapsed = window.innerWidth < 720;
+  const applyCollapsed = () => {
+    body.style.display = collapsed ? "none" : "flex";
+    panel.style.height = collapsed ? "34px" : "250px";
+    const toggle = document.getElementById("abyss-chat-toggle");
+    if (toggle) toggle.textContent = collapsed ? "+" : "-";
+  };
+
+  header.addEventListener("click", () => {
+    collapsed = !collapsed;
+    applyCollapsed();
+    if (!collapsed) {
+      refreshChatMessages();
+      setTimeout(() => chatInputEl?.focus(), 0);
+    }
+  });
+  sendBtn.addEventListener("click", handleChatSubmit);
+  chatInputEl.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") handleChatSubmit();
+  });
+  chatInputEl.addEventListener("keyup", (event) => event.stopPropagation());
+  chatInputEl.addEventListener("keypress", (event) => event.stopPropagation());
+
+  applyCollapsed();
+  refreshChatMessages();
+  if (!chatPollTimer) {
+    chatPollTimer = setInterval(refreshChatMessages, CHAT_POLL_INTERVAL);
+  }
+}
+
 function createPlayerMetaButtons() {
   if (document.getElementById("player-meta-buttons")) return;
   const wrap = document.createElement("div");
@@ -543,6 +738,25 @@ function handleRunEnd(survivalSeconds) {
   }
 
   return { record, best, isNewBest };
+}
+
+function setDevModeEnabled(enabled) {
+  const next = Boolean(enabled);
+  if (devMode === next) return;
+
+  devMode = next;
+  showDevNotice(devMode ? "DEV MODE ON" : "DEV MODE OFF", devMode ? "#00ffd5" : "#ff4444");
+  if (devMode) {
+    createDevButton();
+  } else {
+    removeDevPanel();
+    removeDevButton();
+    showQueuedDevLevelChoice();
+  }
+}
+
+function toggleDevMode() {
+  setDevModeEnabled(!devMode);
 }
 
 // ─────────────────────────────
@@ -1471,6 +1685,7 @@ expInfoText = makeText(this, this.scale.width - 20, 20, "", { fontSize: "15px", 
   showStartScreen.call(this);
   createDevConsole();
   createPlayerMetaButtons();
+  createChatPanel();
   if (!getPlayerProfile()) showNicknamePrompt();
 }
 
@@ -2582,6 +2797,10 @@ function getExpGainMultiplier() {
   return 1 + getPassiveLevel("clarity") * 0.1;
 }
 
+function getPlayerCritChance() {
+  return PLAYER_BASE_CRIT_CHANCE;
+}
+
 function addOrUpgradePassive(id) {
   const currentLevel = getPassiveLevel(id);
   if (currentLevel >= 5) return false;
@@ -2743,14 +2962,15 @@ function handleBulletHit(bullet, enemy) {
 
 function damageEnemy(enemy, amount = 1, options = {}) {
   if (!enemy || !enemy.active) return;
-  const finalDamage = amount * getPlayerAttackMultiplier();
+  const isCrit = Math.random() < getPlayerCritChance();
+  const finalDamage = amount * getPlayerAttackMultiplier() * (isCrit ? PLAYER_CRIT_DAMAGE_MULTIPLIER : 1);
   enemy.hp -= finalDamage;
 
   // setFillStyle → setTint로 교체
   enemy.setTint(enemy.stunnedUntil > this.time.now ? 0x99ddff : 0xff3355);
 
   showHitFlash.call(this, enemy.x, enemy.y);
-  showDamageNumber.call(this, enemy.x, enemy.y - (enemy.displayHeight || 64) * 0.42, finalDamage);
+  showDamageNumber.call(this, enemy.x, enemy.y - (enemy.displayHeight || 64) * 0.42, finalDamage, isCrit);
 
   // 만상무예 카운트
   if (options.countAttack !== false && pathManager) pathManager.countAttack();
@@ -2875,16 +3095,16 @@ function showHitFlash(x, y) {
   this.tweens.add({ targets: flash, alpha: 0, scale: 0.15, duration: 90, onComplete: () => flash.destroy() });
 }
 
-function showDamageNumber(x, y, damage) {
-  const text = makeText(this, x + Phaser.Math.Between(-10, 10), y, formatDamage(damage), {
-    fontSize: "13px", color: "#fff0a6", fontStyle: "900", strokeThickness: 3,
+function showDamageNumber(x, y, damage, isCrit = false) {
+  const text = makeText(this, x + Phaser.Math.Between(-10, 10), y, formatDamage(damage * 10), {
+    fontSize: isCrit ? "18px" : "13px", color: isCrit ? "#ff4d4d" : "#fff0a6", fontStyle: "900", strokeThickness: 3,
   }).setOrigin(0.5).setDepth(120);
-  const riseY = y - Phaser.Math.Between(22, 34);
+  const riseY = y - Phaser.Math.Between(isCrit ? 32 : 22, isCrit ? 46 : 34);
   const fallY = y + Phaser.Math.Between(18, 30);
   this.tweens.add({
     targets: text,
     y: riseY,
-    scale: 1.18,
+    scale: isCrit ? 1.35 : 1.18,
     duration: 150,
     ease: "Cubic.easeOut",
     onComplete: () => {
@@ -3254,17 +3474,7 @@ function createDevConsole() {
   input.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     const val = input.value.trim(); input.value = ""; input.blur();
-    if (val === "소드마스터") {
-      devMode = !devMode;
-      showDevNotice(devMode ? "⚔ DEV MODE ON" : "DEV MODE OFF", devMode ? "#00ffd5" : "#ff4444");
-      if (devMode) {
-        createDevButton();
-      } else {
-        removeDevPanel();
-        removeDevButton();
-        showQueuedDevLevelChoice();
-      }
-    }
+    if (val === "소드마스터" || val === DEV_CHAT_COMMAND) toggleDevMode();
   });
 }
 
