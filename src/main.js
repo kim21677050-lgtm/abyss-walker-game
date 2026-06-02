@@ -26,14 +26,20 @@ const WEAPON_TYPES = [
   { id: "machineGun",   name: "기관총",    icon: "MG", color: 0xffff66, desc: ["빠른 자동 연사","2발 발사","유도탄 추가","폭발탄","드론 지원"] },
   { id: "magicMissile", name: "매직미사일",icon: "MM", color: 0xbb88ff, desc: ["추적 미사일","2발 발사","관통 재추적","폭발","분열 미사일"] },
   { id: "lightning",    name: "낙뢰",      icon: "LT", color: 0x66ccff, desc: ["주변 번개","2타겟","연쇄 번개","스턴","주기 낙뢰"] },
-  { id: "sword",        name: "검",        icon: "SW", color: 0xffd1dc, desc: ["근접 베기","범위 증가","2회 베기","검기","회전 검"] },
   { id: "laser",        name: "레이저",    icon: "LZ", color: 0xff5533, desc: ["직선 레이저","길이 증가","2갈래","화상","회전 레이저"] },
   { id: "skull",        name: "해골",      icon: "SK", color: 0xcc99ff, desc: ["광역 스턴+독","독 지속 증가","반경 확대","스턴 시간 증가","중독 중첩"] },
   { id: "lung",         name: "유지호의 폐",icon:"LG", color: 0xff8844, desc: ["3회 연속 폭발","폭발 범위 증가","5회 연속 폭발","폭발 피해 증가","화염 지속 피해"] },
   { id: "scythe",       name: "대낫",      icon: "SC", color: 0x88ffcc, desc: ["전방 휩쓸기","범위 확대","2회 연속 베기","관통 낫날","회오리 소환"] },
   { id: "blackHole",    name: "블랙홀",    icon: "BH", color: 0xaa44ff, desc: ["적 흡입 후 폭발","반경+피해 증가","2개 동시 소환","흡입 슬로우+폭발 스턴","미니 블랙홀 3개"] },
-  { id: "boomerang",    name: "부메랑",    icon: "BR", color: 0x88ffdd, desc: ["관통 왕복 투사체","2개 동시 발사","왕복 2회","크기+피해 증가","선회 부메랑 추가"] },
   { id: "chain",        name: "체인",      icon: "CH", color: 0x88bbff, desc: ["적 2마리 사슬 연결","연결 3마리","피해 공유","적 끌어당김","연결 5마리+사슬 폭발"] },
+];
+
+const PASSIVE_TYPES = [
+  { id: "agility", name: "민첩", icon: "AG", color: 0x66ffbb, stat: "이동속도", perLevel: 10, desc: "이동속도 10% 증가" },
+  { id: "rage", name: "분노", icon: "RG", color: 0xff6666, stat: "공격력", perLevel: 10, desc: "공격력 10% 증가" },
+  { id: "pickpocket", name: "소매치기", icon: "PK", color: 0xffdd66, stat: "획득 범위", perLevel: 15, desc: "아이템 획득 범위 15% 증가" },
+  { id: "training", name: "단련", icon: "TR", color: 0x88bbff, stat: "최대 체력", perLevel: 20, desc: "최대 체력 20 증가" },
+  { id: "clarity", name: "명쾌", icon: "CL", color: 0xcc99ff, stat: "경험치 획득량", perLevel: 10, desc: "경험치 획득량 10% 증가" },
 ];
 
 // ═══════════════════════════════════════════════════════
@@ -150,6 +156,7 @@ let devMode = false, devPanelEl = null, gameSceneRef = null;
 let devTimeAdjustedThisRun = false;
 let devPendingLevelChoice = false;
 let selectedStartWeaponType = "machineGun";
+let passiveLevels = {};
 let timerText = null, devBtnEl = null, lastMoveAngle = 0;
 let bgChunks = new Map();
 let profilePanelEl = null, rankingPanelEl = null, nicknamePromptEl = null;
@@ -624,6 +631,27 @@ function setDevLevel(targetLevel, queueChoice = true) {
   if (levelText) levelText.setText(`Lv. ${level}`);
 
   console.log(`레벨 변경: ${level}`);
+}
+
+function gainExp(amount = 1) {
+  exp += amount * getExpGainMultiplier();
+  if (exp >= expToNextLevel && !isChoosingWeapon) {
+    if (devMode) { updateExpHud(); return; }
+    while (exp >= expToNextLevel) {
+      exp -= expToNextLevel;
+      level++;
+      expToNextLevel += getNextExpIncrease(expToNextLevel);
+      showLevelUpText.call(gameSceneRef);
+      if (level === PATH_SELECT_LEVEL && !pathManager.chosenPath) {
+        pauseGameplay.call(gameSceneRef);
+        showPathSelection.call(gameSceneRef);
+        break;
+      }
+      showWeaponSelection.call(gameSceneRef);
+      break;
+    }
+  }
+  updateExpHud();
 }
 
 function showQueuedDevLevelChoice() {
@@ -1393,7 +1421,8 @@ function create() {
 
   this.physics.add.overlap(player, expOrbs, (player, orb) => {
     orb.destroy();
-    exp++;
+    gainExp(1);
+    return;
     if (exp >= expToNextLevel && !isChoosingWeapon) {
       if (devMode) return;
       level++;
@@ -2035,6 +2064,8 @@ function showWeaponSelection() {
 
     if (option.isPathSkill) {
       pathManager.addSkill(option.skillId);
+    } else if (option.isPassive) {
+      addOrUpgradePassive(option.passive.id);
     } else {
       weaponManager.addOrUpgrade(option.weaponType.id);
     }
@@ -2054,6 +2085,9 @@ function showWeaponSelection() {
     let card;
     if (option.isPathSkill) {
       card = createPathSkillCard.call(this, x, y, index + 1, option.skill);
+    } else if (option.isPassive) {
+      const nextLevel = Math.min(getPassiveLevel(option.passive.id) + 1, 5);
+      card = createPassiveCard.call(this, x, y, index + 1, option.passive, nextLevel);
     } else {
       const owned = weaponManager.getWeapon(option.weaponType.id);
       const nextLevel = owned ? Math.min(owned.level + 1, 5) : 1;
@@ -2068,7 +2102,7 @@ function showWeaponSelection() {
     hitZone.on("pointerup", () => selectOption(option));
     hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(3, 0xffffff, 0.95));
     hitZone.on("pointerout", () => {
-      const col = option.isPathSkill ? option.skill.color : option.weaponType.color;
+      const col = option.isPathSkill ? option.skill.color : option.isPassive ? option.passive.color : option.weaponType.color;
       card.getByName("bg").setStrokeStyle(2, col, 0.75);
     });
     overlay.add([card, hitZone]);
@@ -2120,6 +2154,7 @@ function getRandomWeaponOptions() {
   const weaponPool = ownedWeapons.length >= weaponManager.maxWeapons
     ? WEAPON_TYPES.filter((w) => ownedWeapons.includes(w.id) && !maxedWeapons.includes(w.id))
     : WEAPON_TYPES.filter((w) => !maxedWeapons.includes(w.id));
+  const passivePool = PASSIVE_TYPES.filter((passive) => getPassiveLevel(passive.id) < 5);
 
   // 길 스킬 풀 계산
   let pathSkillOptions = [];
@@ -2152,20 +2187,27 @@ function getRandomWeaponOptions() {
     pathManager.guaranteeNextSkill = false;
     // 확정 스킬 1개 + 무기 2개
     const guaranteed = { isPathSkill: true, skill: pathSkillOptions[0], skillId: pathSkillOptions[0].id };
-    const weaponOptions = Phaser.Utils.Array.Shuffle([...weaponPool]).slice(0, 2).map((w) => ({ isPathSkill: false, weaponType: w }));
+    const weaponOptions = Phaser.Utils.Array.Shuffle([
+      ...weaponPool.map((w) => ({ isPathSkill: false, weaponType: w })),
+      ...passivePool.map((passive) => ({ isPassive: true, passive })),
+    ]).slice(0, 2);
     return Phaser.Utils.Array.Shuffle([guaranteed, ...weaponOptions]);
   }
 
   if (guarantee20) {
     pathManager.guaranteed20Done = true;
     const guaranteed = { isPathSkill: true, skill: pathSkillOptions[0], skillId: pathSkillOptions[0].id };
-    const weaponOptions = Phaser.Utils.Array.Shuffle([...weaponPool]).slice(0, 2).map((w) => ({ isPathSkill: false, weaponType: w }));
+    const weaponOptions = Phaser.Utils.Array.Shuffle([
+      ...weaponPool.map((w) => ({ isPathSkill: false, weaponType: w })),
+      ...passivePool.map((passive) => ({ isPassive: true, passive })),
+    ]).slice(0, 2);
     return Phaser.Utils.Array.Shuffle([guaranteed, ...weaponOptions]);
   }
 
   // 일반: 무기 + 길 스킬 랜덤 혼합 (최대 3개)
   const allOptions = [
     ...weaponPool.map((w) => ({ isPathSkill: false, weaponType: w })),
+    ...passivePool.map((passive) => ({ isPassive: true, passive })),
     ...pathSkillOptions.map((sk) => ({ isPathSkill: true, skill: sk, skillId: sk.id })),
   ];
 
@@ -2327,7 +2369,8 @@ function resetJoystick() {
 
 // ─── 플레이어 이동 ──────────────────────────────────────
 function movePlayer() {
-  const maxSpeed = 350;
+  const maxSpeed = 350 * getMoveSpeedMultiplier();
+  player.body.setMaxVelocity(maxSpeed);
   let dx = 0, dy = 0;
   if (cursors.left.isDown)  dx -= 1;
   if (cursors.right.isDown) dx += 1;
@@ -2359,7 +2402,8 @@ function movePlayer() {
 }
 
 function pullExpOrbs() {
-  const pullRangeSq = 225 * 225;
+  const pullRange = 225 * getPickupRangeMultiplier();
+  const pullRangeSq = pullRange * pullRange;
   expOrbs.getChildren().forEach((orb) => {
     const dx = player.x - orb.x, dy = player.y - orb.y;
     if (dx * dx + dy * dy < pullRangeSq)
@@ -2396,7 +2440,7 @@ function resumeGameplay() {
 // ─── 무기 카드 ──────────────────────────────────────────
 function createWeaponCard(x, y, number, weaponType, nextLevel) {
   const card = this.add.container(x, y);
-  const nextDamage = getWeaponDamage(weaponType.id, nextLevel);
+  const nextDamage = getWeaponDamage(weaponType.id, nextLevel) * getPlayerAttackMultiplier();
   const panel = createGlassPanel(this, 0, 0, 220, 276, weaponType.color, 0.96);
   const bg = panel.outer.setName("bg");
   const badge = this.add.rectangle(-92, -120, 34, 28, 0x1a2433, 0.95)
@@ -2429,8 +2473,45 @@ function createWeaponCard(x, y, number, weaponType, nextLevel) {
 }
 
 // ─── HUD ────────────────────────────────────────────────
+function createPassiveCard(x, y, number, passive, nextLevel) {
+  const card = this.add.container(x, y);
+  const totalPercent = passive.perLevel * nextLevel;
+  const panel = createGlassPanel(this, 0, 0, 220, 276, passive.color, 0.96);
+  const bg = panel.outer.setName("bg");
+  const badge = this.add.rectangle(-92, -120, 34, 28, 0x1a2433, 0.95)
+    .setStrokeStyle(1, passive.color, 0.55);
+  const key = makeText(this, -92, -120, `${number}`, {
+    fontSize: "15px", color: "#ffffff", fontStyle: "800", strokeThickness: 0,
+  }).setOrigin(0.5);
+  const iconPlate = this.add.circle(0, -67, 36, passive.color, 0.12)
+    .setStrokeStyle(1, passive.color, 0.45);
+  const icon = makeText(this, 0, -67, passive.icon, {
+    fontSize: "31px", color: hexColor(passive.color), fontStyle: "900",
+  }).setOrigin(0.5);
+  const name = makeText(this, 0, -18, passive.name, {
+    fontSize: "21px", color: UI.text, fontStyle: "800",
+  }).setOrigin(0.5);
+  const levelPill = this.add.rectangle(0, 22, 86, 24, passive.color, 0.13)
+    .setStrokeStyle(1, passive.color, 0.55);
+  const levelLabel = makeText(this, 0, 22, `Lv.${nextLevel}`, {
+    fontSize: "14px", color: "#d8f7ff", fontStyle: "800", strokeThickness: 0,
+  }).setOrigin(0.5);
+  const statLabel = makeText(this, 0, 58, `${passive.stat} +${totalPercent}%`, {
+    fontSize: "14px", color: "#fff0a6", fontStyle: "800", strokeThickness: 0,
+  }).setOrigin(0.5);
+  const desc = makeText(this, 0, 96, passive.desc, {
+    fontSize: "14px", color: "#d8deea", align: "center", wordWrap: { width: 170 },
+    strokeThickness: 0,
+  }).setOrigin(0.5);
+  card.add([bg, panel.inner, panel.line, badge, key, iconPlate, icon, name, levelPill, levelLabel, statLabel, desc]);
+  return card;
+}
+
 function updateWeaponHud() {
   const weaponParts = weaponManager.weapons.map((w) => `${w.definition.name} Lv.${w.level}`);
+  const passiveParts = PASSIVE_TYPES
+    .filter((passive) => getPassiveLevel(passive.id) > 0)
+    .map((passive) => `${passive.name} Lv.${getPassiveLevel(passive.id)}`);
   const skillParts = pathManager && pathManager.acquiredSkills.length > 0
     ? pathManager.acquiredSkills.map((sid) => `✦ ${PATH_SKILLS[sid].name}`)
     : [];
@@ -2438,7 +2519,7 @@ function updateWeaponHud() {
     ? [`[${PATH_TYPES[pathManager.chosenPath].name}]`]
     : [];
 
-  weaponText.setText([...pathPart, ...weaponParts, ...skillParts].join(" / "));
+  weaponText.setText([...pathPart, ...weaponParts, ...passiveParts, ...skillParts].join(" / "));
   layoutHud(weaponText.scene);
 }
 
@@ -2447,7 +2528,7 @@ function updateExpHud() {
   lastHudLevel = level;
   lastHudExp = exp;
   lastHudExpToNext = expToNextLevel;
-  expInfoText.setText(`Lv. ${level}\nEXP ${exp}/${expToNextLevel}`);
+  expInfoText.setText(`Lv. ${level}\nEXP ${formatDamage(exp)}/${expToNextLevel}`);
 }
 function layoutHud(scene, width = scene.scale.width, height = scene.scale.height) {
   const padding = Math.max(14, Math.min(24, width * 0.035));
@@ -2481,18 +2562,51 @@ function formatDamage(value) {
   return Number.isInteger(value) ? `${value}` : value.toFixed(1);
 }
 
+function getPassiveLevel(id) {
+  return passiveLevels[id] || 0;
+}
+
+function getPlayerAttackMultiplier() {
+  return 1 + getPassiveLevel("rage") * 0.1;
+}
+
+function getMoveSpeedMultiplier() {
+  return 1 + getPassiveLevel("agility") * 0.1;
+}
+
+function getPickupRangeMultiplier() {
+  return 1 + getPassiveLevel("pickpocket") * 0.15;
+}
+
+function getExpGainMultiplier() {
+  return 1 + getPassiveLevel("clarity") * 0.1;
+}
+
+function addOrUpgradePassive(id) {
+  const currentLevel = getPassiveLevel(id);
+  if (currentLevel >= 5) return false;
+  passiveLevels[id] = currentLevel + 1;
+
+  if (id === "training") {
+    playerMaxHp += 20;
+    playerHp = Math.min(playerMaxHp, playerHp + 20);
+    updateHealthBar();
+  }
+
+  updateWeaponHud();
+  return true;
+}
+
 function getWeaponDamage(type, level) {
   const damageTable = {
     machineGun: [0.7, 1.3, 1.9, 2.5, 3.4],
     magicMissile: [2.2, 3.7, 5.2, 7.6, 11.2],
     lightning: [2.5, 4.3, 6.1, 8.2, 11.5],
-    sword: [1.6, 3.1, 4.6, 6.1, 8.2],
     laser: [2.4, 4.2, 6.0, 8.1, 10.2],
     skull: [3.0, 5.4, 7.8, 10.5, 13.5],
     lung: [2.8, 4.9, 6.4, 9.4, 12.4],
     scythe: [3.7, 7.6, 10.6, 14.2, 18.1],
     blackHole: [3.2, 7.1, 10.1, 14.0, 18.2],
-    boomerang: [2.0, 3.8, 5.6, 8.0, 10.4],
     chain: [1.8, 3.3, 4.8, 6.0, 9.0],
   };
   return damageTable[type][Math.min(level, 5) - 1];
@@ -2629,12 +2743,14 @@ function handleBulletHit(bullet, enemy) {
 
 function damageEnemy(enemy, amount = 1, options = {}) {
   if (!enemy || !enemy.active) return;
-  enemy.hp -= amount;
+  const finalDamage = amount * getPlayerAttackMultiplier();
+  enemy.hp -= finalDamage;
 
   // setFillStyle → setTint로 교체
   enemy.setTint(enemy.stunnedUntil > this.time.now ? 0x99ddff : 0xff3355);
 
   showHitFlash.call(this, enemy.x, enemy.y);
+  showDamageNumber.call(this, enemy.x, enemy.y - (enemy.displayHeight || 64) * 0.42, finalDamage);
 
   // 만상무예 카운트
   if (options.countAttack !== false && pathManager) pathManager.countAttack();
@@ -2757,6 +2873,32 @@ function showTrailDot(x, y, color, size = 5) {
 function showHitFlash(x, y) {
   const flash = this.add.circle(x, y, 18, 0xffffff, 0.28).setDepth(55);
   this.tweens.add({ targets: flash, alpha: 0, scale: 0.15, duration: 90, onComplete: () => flash.destroy() });
+}
+
+function showDamageNumber(x, y, damage) {
+  const text = makeText(this, x + Phaser.Math.Between(-10, 10), y, formatDamage(damage), {
+    fontSize: "13px", color: "#fff0a6", fontStyle: "900", strokeThickness: 3,
+  }).setOrigin(0.5).setDepth(120);
+  const riseY = y - Phaser.Math.Between(22, 34);
+  const fallY = y + Phaser.Math.Between(18, 30);
+  this.tweens.add({
+    targets: text,
+    y: riseY,
+    scale: 1.18,
+    duration: 150,
+    ease: "Cubic.easeOut",
+    onComplete: () => {
+      this.tweens.add({
+        targets: text,
+        y: fallY,
+        alpha: 0,
+        scale: 0.78,
+        duration: 330,
+        ease: "Cubic.easeIn",
+        onComplete: () => text.destroy(),
+      });
+    },
+  });
 }
 
 function showDeathBurst(x, y) {
@@ -2891,13 +3033,11 @@ function createWeapon(scene, type) {
     case "machineGun":  return new MachineGunWeapon(scene);
     case "magicMissile":return new MagicMissileWeapon(scene);
     case "lightning":   return new LightningWeapon(scene);
-    case "sword":       return new SwordWeapon(scene);
     case "laser":       return new LaserWeapon(scene);
     case "skull":       return new SkullWeapon(scene);
     case "lung":        return new LungWeapon(scene);
     case "scythe":      return new ScytheWeapon(scene);
     case "blackHole":   return new BlackHoleWeapon(scene);
-    case "boomerang":   return new BoomerangWeapon(scene);
     case "chain":       return new ChainWeapon(scene);
     default: throw new Error(`Unknown weapon type: ${type}`);
   }
@@ -2985,6 +3125,7 @@ function killPlayer() {
     playerHp = 100; playerMaxHp = 100;
     enemyMaxHp = 3; enemySpawnBonus = 0; enemySpawnRemainder = 0;
     devTimeAdjustedThisRun = false;
+    passiveLevels = {};
     playerVelocity.x = 0; playerVelocity.y = 0;
     this.scene.restart();
   };
@@ -2998,6 +3139,7 @@ function showStartScreen() {
   spawnTimer.paused = true; enemyHealthTimer.paused = true; enemyHealthPercentTimer.paused = true; enemySpawnGrowthTimer.paused = true;
   isChoosingWeapon = true;
   setPlayerMetaButtonsVisible(true);
+  if (!WEAPON_TYPES.some((weapon) => weapon.id === selectedStartWeaponType)) selectedStartWeaponType = "machineGun";
 
   const W = this.scale.width, H = this.scale.height, cx = W / 2, cy = H / 2;
   const compact = W < 680 || H < 620;
