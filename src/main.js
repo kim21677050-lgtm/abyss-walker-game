@@ -134,6 +134,8 @@ let devMode = false, devPanelEl = null, gameSceneRef = null;
 let devPendingLevelChoice = false;
 let timerText = null, devBtnEl = null, lastMoveAngle = 0;
 let bgChunks = new Map();
+let lastBgChunkX = null, lastBgChunkY = null;
+let lastHudLevel = null, lastHudExp = null, lastHudExpToNext = null, lastLevelTextLevel = null, lastTimerSecond = -1;
 const CHUNK_SIZE = 512, CHUNK_RENDER_RADIUS = 3;
 const playerVelocity = { x: 0, y: 0 };
 const PATH_CARD_WIDTH = 250;
@@ -1007,6 +1009,7 @@ expInfoText = makeText(this, this.scale.width - 20, 20, "", { fontSize: "15px", 
 
   cursors = this.input.keyboard.addKeys({ up: "W", down: "S", left: "A", right: "D" });
   weaponManager.addOrUpgrade("machineGun");
+  lastHudLevel = null; lastHudExp = null; lastHudExpToNext = null; lastLevelTextLevel = null; lastTimerSecond = -1;
   updateWeaponHud();
   updateExpHud();
 
@@ -1030,21 +1033,19 @@ function update(time, delta) {
 
   movePlayer();
 
-  enemies.getChildren().forEach((enemy) => {
+  const enemyChildren = enemies.getChildren();
+  enemyChildren.forEach((enemy) => {
     if (!enemy.active || !enemy.body) return;
     if (enemy.frozen) return;
 
-    // 괴물의 꿈: 도망 중인 적
     if (enemy.fleeing) {
       const angle = Phaser.Math.Angle.Between(player.x, player.y, enemy.x, enemy.y);
       this.physics.velocityFromAngle(Phaser.Math.RadToDeg(angle), 130, enemy.body.velocity);
-      enemy.setFlipX(player.x > enemy.x);  // 도망칠 때도 방향 유지
-
+      enemy.setFlipX(player.x > enemy.x);
       return;
     }
 
     if (enemy.stunnedUntil && enemy.stunnedUntil > time) {
-      // 둔화 중인 적은 느리게 이동
       if (enemy.slowed) {
         this.physics.moveToObject(enemy, player, 45);
       } else {
@@ -1059,32 +1060,38 @@ function update(time, delta) {
 
   if (!isDead) {
     const elapsed = Math.floor((time - gameStartTime) / 1000);
-    const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
-    const ss = String(elapsed % 60).padStart(2, "0");
-    timerText.setText(`${mm}:${ss}`);
+    if (elapsed !== lastTimerSecond) {
+      lastTimerSecond = elapsed;
+      const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+      const ss = String(elapsed % 60).padStart(2, "0");
+      timerText.setText(`${mm}:${ss}`);
+    }
   }
 
   weaponManager.tick(time, delta);
-  pathManager.tick(time, delta);       // ← 길 스킬 틱
+  pathManager.tick(time, delta);
   applyContactDamage.call(this, delta);
   updateHealthBar();
   updateProjectiles.call(this, time, delta);
   pullExpOrbs.call(this);
 
-  levelText.setText(`Lv. ${level}`);
+  if (level !== lastLevelTextLevel) {
+    lastLevelTextLevel = level;
+    levelText.setText(`Lv. ${level}`);
+  }
   updateExpHud();
 
   if (!isDead) {
-    const touchingNow = enemies.getChildren().some((e) =>
-      e.active && Phaser.Math.Distance.Between(player.x, player.y, e.x, e.y) < 38
-    );
+    const touchRangeSq = 38 * 38;
+    const touchingNow = enemyChildren.some((e) => {
+      if (!e.active) return false;
+      const dx = player.x - e.x, dy = player.y - e.y;
+      return dx * dx + dy * dy < touchRangeSq;
+    });
     if (!touchingNow) player.clearTint();
   }
 }
 
-// ═══════════════════════════════════════════════════════
-// 길(Path) 매니저
-// ═══════════════════════════════════════════════════════
 class PathManager {
   constructor(scene) {
     this.scene = scene;
@@ -1934,13 +1941,14 @@ function movePlayer() {
 }
 
 function pullExpOrbs() {
+  const pullRangeSq = 225 * 225;
   expOrbs.getChildren().forEach((orb) => {
-    if (Phaser.Math.Distance.Between(player.x, player.y, orb.x, orb.y) < 225)
+    const dx = player.x - orb.x, dy = player.y - orb.y;
+    if (dx * dx + dy * dy < pullRangeSq)
       this.physics.moveToObject(orb, player, 520);
   });
 }
 
-// ─── 레벨업 텍스트 ──────────────────────────────────────
 function showLevelUpText() {
   if (levelUpText) levelUpText.destroy();
   levelUpText = this.add.text(player.x, player.y - 50, `LEVEL UP! Lv.${level}`, {
@@ -2017,9 +2025,12 @@ function updateWeaponHud() {
 }
 
 function updateExpHud() {
+  if (level === lastHudLevel && exp === lastHudExp && expToNextLevel === lastHudExpToNext) return;
+  lastHudLevel = level;
+  lastHudExp = exp;
+  lastHudExpToNext = expToNextLevel;
   expInfoText.setText(`Lv. ${level}\nEXP ${exp}/${expToNextLevel}`);
 }
-
 function layoutHud(scene, width = scene.scale.width, height = scene.scale.height) {
   const padding = Math.max(14, Math.min(24, width * 0.035));
   const compact = width < 640;
@@ -2338,25 +2349,46 @@ function showLaserBeam(scene, startX, startY, endX, endY, burn = false) {
 
 // ─── 유틸 ────────────────────────────────────────────────
 function findNearestEnemy(excludeEnemy = null) {
-  let nearest = null, shortestDistance = Infinity;
+  let nearest = null, shortestDistanceSq = Infinity;
   enemies.getChildren().forEach((enemy) => {
     if (enemy === excludeEnemy || !enemy.active) return;
-    const distance = Phaser.Math.Distance.Between(player.x, player.y, enemy.x, enemy.y);
-    if (distance < shortestDistance) { shortestDistance = distance; nearest = enemy; }
+    const dx = player.x - enemy.x, dy = player.y - enemy.y;
+    const distanceSq = dx * dx + dy * dy;
+    if (distanceSq < shortestDistanceSq) { shortestDistanceSq = distanceSq; nearest = enemy; }
   });
   return nearest;
 }
 
 function findEnemiesInRange(x, y, range, limit = Infinity) {
-  return enemies.getChildren()
-    .filter((e) => e.active)
-    .map((e) => ({ enemy: e, distance: Phaser.Math.Distance.Between(x, y, e.x, e.y) }))
-    .filter((entry) => entry.distance <= range)
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, limit)
-    .map((entry) => entry.enemy);
-}
+  const rangeSq = range * range;
+  const children = enemies.getChildren();
 
+  if (limit === Infinity) {
+    const entries = [];
+    children.forEach((enemy) => {
+      if (!enemy.active) return;
+      const dx = x - enemy.x, dy = y - enemy.y;
+      const distanceSq = dx * dx + dy * dy;
+      if (distanceSq <= rangeSq) entries.push({ enemy, distanceSq });
+    });
+    entries.sort((a, b) => a.distanceSq - b.distanceSq);
+    return entries.map((entry) => entry.enemy);
+  }
+
+  const entries = [];
+  children.forEach((enemy) => {
+    if (!enemy.active) return;
+    const dx = x - enemy.x, dy = y - enemy.y;
+    const distanceSq = dx * dx + dy * dy;
+    if (distanceSq > rangeSq) return;
+
+    let insertAt = entries.length;
+    while (insertAt > 0 && entries[insertAt - 1].distanceSq > distanceSq) insertAt--;
+    entries.splice(insertAt, 0, { enemy, distanceSq });
+    if (entries.length > limit) entries.length = limit;
+  });
+  return entries.map((entry) => entry.enemy);
+}
 function splitMissile(x, y) {
   findEnemiesInRange(x, y, 650, 3).forEach((target) => {
     const bullet = createProjectile(this, x, y, 0xd6a6ff, 5);
@@ -2404,9 +2436,11 @@ function applyContactDamage(delta) {
   }
 
   let touchingEnemy = false;
+  const contactRangeSq = 38 * 38;
   enemies.getChildren().forEach((enemy) => {
     if (!enemy.active) return;
-    if (Phaser.Math.Distance.Between(player.x, player.y, enemy.x, enemy.y) < 38) {
+    const dx = player.x - enemy.x, dy = player.y - enemy.y;
+    if (dx * dx + dy * dy < contactRangeSq) {
       touchingEnemy = true;
     }
   });
@@ -2752,6 +2786,11 @@ function showWarningText() {
 
 // ─── 무한 배경 ───────────────────────────────────────────
 function initInfiniteBackground() {
+  bgChunks.forEach((graphics) => { if (graphics?.active) graphics.destroy(); });
+  bgChunks.clear();
+  lastBgChunkX = null;
+  lastBgChunkY = null;
+
   const vignette = this.add.graphics().setScrollFactor(0).setDepth(5);
   const W = this.scale.width, H = this.scale.height;
   for (let i = 10; i > 0; i--) {
@@ -2761,9 +2800,12 @@ function initInfiniteBackground() {
   }
   updateInfiniteBackground.call(this);
 }
-
 function updateInfiniteBackground() {
   const pcx = Math.floor(player.x / CHUNK_SIZE), pcy = Math.floor(player.y / CHUNK_SIZE);
+  if (pcx === lastBgChunkX && pcy === lastBgChunkY) return;
+  lastBgChunkX = pcx;
+  lastBgChunkY = pcy;
+
   const needed = new Set();
   for (let cx = pcx - CHUNK_RENDER_RADIUS; cx <= pcx + CHUNK_RENDER_RADIUS; cx++) {
     for (let cy = pcy - CHUNK_RENDER_RADIUS; cy <= pcy + CHUNK_RENDER_RADIUS; cy++) {
@@ -2775,7 +2817,6 @@ function updateInfiniteBackground() {
     if (!needed.has(key)) { graphics.destroy(); bgChunks.delete(key); }
   }
 }
-
 function createChunk(cx, cy) {
   const tileSize = 64, tilesPerChunk = Math.ceil(CHUNK_SIZE / tileSize);
   const startX = cx * CHUNK_SIZE, startY = cy * CHUNK_SIZE;
