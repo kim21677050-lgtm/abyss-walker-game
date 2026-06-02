@@ -140,7 +140,7 @@ const config = {
   backgroundColor: "#111111",
   scale: {
     mode: Phaser.Scale.RESIZE,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
+    autoCenter: Phaser.Scale.NO_CENTER,
     width: initialViewport.width,
     height: initialViewport.height,
   },
@@ -164,6 +164,8 @@ function syncGameViewport() {
       game.canvas.style.width = `${width}px`;
       game.canvas.style.height = `${height}px`;
     }
+    game.scale.updateBounds?.();
+    game.input?.manager?.updateBounds?.();
   });
 }
 
@@ -2586,21 +2588,48 @@ function createJoystick() {
 
   this.input.on("pointerdown", (pointer) => {
     if (isChoosingWeapon || joystick.active) return;
+    const pos = getCanvasPointerPosition(pointer);
     joystick.pointerId = pointer.id;
     joystick.active = true;
-    joystick.base.setPosition(pointer.x, pointer.y).setVisible(true);
-    joystick.knob.setPosition(pointer.x, pointer.y).setVisible(true);
-    updateJoystick(pointer.x, pointer.y);
+    joystick.base.setPosition(pos.x, pos.y).setVisible(true);
+    joystick.knob.setPosition(pos.x, pos.y).setVisible(true);
+    updateJoystick(pos.x, pos.y);
   });
   this.input.on("pointermove", (pointer) => {
     if (!joystick.active || joystick.pointerId !== pointer.id) return;
-    updateJoystick(pointer.x, pointer.y);
+    const pos = getCanvasPointerPosition(pointer);
+    updateJoystick(pos.x, pos.y);
   });
   this.input.on("pointerup", (pointer) => { if (joystick.pointerId === pointer.id) resetJoystick(); });
   this.input.on("pointerupoutside", (pointer) => { if (joystick.pointerId === pointer.id) resetJoystick(); });
 }
 
 function layoutJoystick() {}
+
+function getCanvasPointerPosition(pointer) {
+  const event = pointer.event;
+  const touches = event?.changedTouches?.length ? event.changedTouches : event?.touches;
+  let clientX = pointer.x;
+  let clientY = pointer.y;
+
+  if (touches?.length) {
+    const touchList = Array.from(touches);
+    const touch = touchList.find((item) => item.identifier === pointer.identifier || item.identifier === pointer.id) || touchList[0];
+    clientX = touch.clientX;
+    clientY = touch.clientY;
+  } else if (Number.isFinite(event?.clientX) && Number.isFinite(event?.clientY)) {
+    clientX = event.clientX;
+    clientY = event.clientY;
+  }
+
+  const rect = game.canvas?.getBoundingClientRect();
+  if (!rect?.width || !rect?.height) return { x: pointer.x, y: pointer.y };
+
+  return {
+    x: (clientX - rect.left) * (game.scale.width / rect.width),
+    y: (clientY - rect.top) * (game.scale.height / rect.height),
+  };
+}
 
 function updateJoystick(pointerX, pointerY) {
   const dx = pointerX - joystick.base.x, dy = pointerY - joystick.base.y;
