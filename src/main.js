@@ -207,6 +207,7 @@ let lastBgChunkX = null, lastBgChunkY = null;
 let lastHudLevel = null, lastHudExp = null, lastHudExpToNext = null, lastLevelTextLevel = null, lastTimerSecond = -1;
 const CHUNK_SIZE = 512, CHUNK_RENDER_RADIUS = 3;
 const playerVelocity = { x: 0, y: 0 };
+const hasTouchInput = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 const PATH_CARD_WIDTH = 250;
 const PATH_CARD_HEIGHT = 340;
 const UI = {
@@ -2585,6 +2586,11 @@ function showDreamEffect(scene) {
 
 // ─── 조이스틱 ────────────────────────────────────────────
 function createJoystick() {
+  if (hasTouchInput) {
+    createDomJoystick();
+    return;
+  }
+
   const base = this.add.circle(0, 0, 58, 0x0d1b25, 0.42)
     .setStrokeStyle(2, UI.cyan, 0.45).setScrollFactor(0).setDepth(1500).setVisible(false);
   const knob = this.add.circle(0, 0, 24, UI.cyan, 0.32)
@@ -2611,6 +2617,84 @@ function createJoystick() {
 }
 
 function layoutJoystick() {}
+
+function createDomJoystick() {
+  if (document.getElementById("dom-joystick-base")) return;
+
+  const base = document.createElement("div");
+  base.id = "dom-joystick-base";
+  base.style.cssText = "position:fixed;left:0;top:0;width:116px;height:116px;margin-left:-58px;margin-top:-58px;border-radius:50%;background:rgba(13,27,37,0.42);border:2px solid rgba(110,231,210,0.45);z-index:99960;pointer-events:none;display:none;box-sizing:border-box;";
+
+  const knob = document.createElement("div");
+  knob.id = "dom-joystick-knob";
+  knob.style.cssText = "position:fixed;left:0;top:0;width:48px;height:48px;margin-left:-24px;margin-top:-24px;border-radius:50%;background:rgba(110,231,210,0.32);border:2px solid rgba(255,255,255,0.62);z-index:99961;pointer-events:none;display:none;box-sizing:border-box;";
+
+  document.body.appendChild(base);
+  document.body.appendChild(knob);
+
+  joystick = {
+    base,
+    knob,
+    pointerId: null,
+    active: false,
+    radius: 54,
+    vector: new Phaser.Math.Vector2(0, 0),
+    baseX: 0,
+    baseY: 0,
+    isDom: true,
+  };
+
+  const shouldIgnoreTouch = (event) => {
+    if (isChoosingWeapon || isDead || joystick.active) return true;
+    const target = event.target;
+    return Boolean(target?.closest?.("button,input,select,textarea,#abyss-chat-panel,#player-meta-buttons"));
+  };
+
+  window.addEventListener("pointerdown", (event) => {
+    if (!event.isPrimary || event.pointerType !== "touch" || shouldIgnoreTouch(event)) return;
+    event.preventDefault();
+    joystick.pointerId = event.pointerId;
+    joystick.active = true;
+    joystick.baseX = event.clientX;
+    joystick.baseY = event.clientY;
+    joystick.base.style.transform = `translate(${joystick.baseX}px, ${joystick.baseY}px)`;
+    joystick.knob.style.transform = `translate(${joystick.baseX}px, ${joystick.baseY}px)`;
+    joystick.base.style.display = "block";
+    joystick.knob.style.display = "block";
+    updateDomJoystick(event.clientX, event.clientY);
+  }, { passive: false });
+
+  window.addEventListener("pointermove", (event) => {
+    if (!joystick.active || joystick.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    updateDomJoystick(event.clientX, event.clientY);
+  }, { passive: false });
+
+  const endTouch = (event) => {
+    if (joystick.pointerId === event.pointerId) resetJoystick();
+  };
+  window.addEventListener("pointerup", endTouch, { passive: true });
+  window.addEventListener("pointercancel", endTouch, { passive: true });
+}
+
+function updateDomJoystick(clientX, clientY) {
+  const dx = clientX - joystick.baseX;
+  const dy = clientY - joystick.baseY;
+  const rawDistance = Math.sqrt(dx * dx + dy * dy);
+  if (rawDistance < 1) {
+    joystick.knob.style.transform = `translate(${joystick.baseX}px, ${joystick.baseY}px)`;
+    joystick.vector.set(0, 0);
+    return;
+  }
+
+  const distance = Math.min(joystick.radius, rawDistance);
+  const nx = dx / rawDistance;
+  const ny = dy / rawDistance;
+  const knobX = joystick.baseX + nx * distance;
+  const knobY = joystick.baseY + ny * distance;
+  joystick.knob.style.transform = `translate(${knobX}px, ${knobY}px)`;
+  joystick.vector.set(nx, ny);
+}
 
 function getCanvasPointerPosition(pointer) {
   const event = pointer.event;
@@ -2647,7 +2731,13 @@ function updateJoystick(pointerX, pointerY) {
 
 function resetJoystick() {
   joystick.active = false; joystick.pointerId = null; joystick.vector.set(0, 0);
-  joystick.base.setVisible(false); joystick.knob.setVisible(false);
+  if (joystick.isDom) {
+    joystick.base.style.display = "none";
+    joystick.knob.style.display = "none";
+  } else {
+    joystick.base.setVisible(false);
+    joystick.knob.setVisible(false);
+  }
 }
 
 // ─── 플레이어 이동 ──────────────────────────────────────
