@@ -10,6 +10,11 @@ const ENEMY_HEALTH_FLAT_INCREASE = 5;
 const ENEMY_HEALTH_GROWTH_INTERVAL = 120000;
 const ENEMY_HEALTH_GROWTH_MULTIPLIER = 1.15;
 const PATH_SELECT_LEVEL = 15; // 길 선택 레벨
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://aezpthrsvtatfonhtvlo.supabase.co";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_E_uydK1TiiUidl2z507RCQ_wOJ-xy9C";
+const SCORE_TABLE = "abyss_scores";
+const PROFILE_STORAGE_KEY = "abyssWalker.playerProfile";
+const BEST_RECORD_STORAGE_KEY = "abyssWalker.bestRecord";
 
 // ═══════════════════════════════════════════════════════
 // 무기 정의
@@ -142,6 +147,7 @@ let devMode = false, devPanelEl = null, gameSceneRef = null;
 let devPendingLevelChoice = false;
 let timerText = null, devBtnEl = null, lastMoveAngle = 0;
 let bgChunks = new Map();
+let profilePanelEl = null, rankingPanelEl = null, nicknamePromptEl = null;
 let lastBgChunkX = null, lastBgChunkY = null;
 let lastHudLevel = null, lastHudExp = null, lastHudExpToNext = null, lastLevelTextLevel = null, lastTimerSecond = -1;
 const CHUNK_SIZE = 512, CHUNK_RENDER_RADIUS = 3;
@@ -174,6 +180,353 @@ function createGlassPanel(scene, x, y, width, height, accent = UI.cyan, alpha = 
   const inner = scene.add.rectangle(x, y - height * 0.24, width - 8, height * 0.48, UI.panel, 0.26);
   const line = scene.add.rectangle(x, y - height / 2 + 12, width - 28, 1, accent, 0.38);
   return { outer, inner, line };
+}
+
+function safeJsonParse(value, fallback = null) {
+  try { return value ? JSON.parse(value) : fallback; }
+  catch { return fallback; }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  })[char]);
+}
+
+function generatePlayerId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `player-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function getPlayerProfile() {
+  return safeJsonParse(localStorage.getItem(PROFILE_STORAGE_KEY), null);
+}
+
+function savePlayerProfile(profile) {
+  localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+}
+
+function ensurePlayerProfile(nickname) {
+  const cleanName = String(nickname || "").trim().slice(0, 16);
+  if (!cleanName) return null;
+
+  const existing = getPlayerProfile();
+  const profile = {
+    playerId: existing?.playerId || generatePlayerId(),
+    nickname: cleanName,
+    createdAt: existing?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  savePlayerProfile(profile);
+  return profile;
+}
+
+function getPersonalBest() {
+  return safeJsonParse(localStorage.getItem(BEST_RECORD_STORAGE_KEY), null);
+}
+
+function savePersonalBest(record) {
+  localStorage.setItem(BEST_RECORD_STORAGE_KEY, JSON.stringify(record));
+}
+
+function isBetterRecord(next, previous) {
+  if (!previous) return true;
+  if (next.survival_seconds !== previous.survival_seconds) return next.survival_seconds > previous.survival_seconds;
+  return next.level > (previous.level || 0);
+}
+
+function formatSurvivalTime(seconds) {
+  const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const mm = String(Math.floor(safeSeconds / 60)).padStart(2, "0");
+  const ss = String(safeSeconds % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+function getCurrentPathName() {
+  return pathManager?.chosenPath ? PATH_TYPES[pathManager.chosenPath]?.name || "" : "";
+}
+
+function getWeaponSummary() {
+  return weaponManager?.weapons?.map((weapon) => ({
+    id: weapon.type,
+    name: weapon.definition?.name || weapon.type,
+    level: weapon.level,
+  })) || [];
+}
+
+function buildRunRecord(survivalSeconds) {
+  const profile = getPlayerProfile();
+  return {
+    player_id: profile?.playerId || "anonymous",
+    nickname: profile?.nickname || "PLAYER",
+    survival_seconds: Math.max(0, Math.floor(survivalSeconds)),
+    level,
+    path_id: pathManager?.chosenPath || null,
+    path_name: getCurrentPathName(),
+    weapons: getWeaponSummary(),
+    created_at: new Date().toISOString(),
+  };
+}
+
+function compactWeaponText(weapons = []) {
+  if (!Array.isArray(weapons) || weapons.length === 0) return "-";
+  return weapons.map((weapon) => `${weapon.name || weapon.id} Lv.${weapon.level || 1}`).join(", ");
+}
+
+async function submitScore(record) {
+  const selectParams = new URLSearchParams({
+    select: "survival_seconds,level",
+    player_id: `eq.${record.player_id}`,
+    order: "survival_seconds.desc,level.desc,created_at.asc",
+    limit: "1",
+  });
+
+  const existingResponse = await fetch(`${SUPABASE_URL}/rest/v1/${SCORE_TABLE}?${selectParams.toString()}`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+  });
+
+  if (!existingResponse.ok) {
+    const detail = await existingResponse.text().catch(() => "");
+    throw new Error(detail || `Score lookup failed: ${existingResponse.status}`);
+  }
+
+  const [existingRecord] = await existingResponse.json();
+  if (existingRecord && !isBetterRecord(record, existingRecord)) return;
+
+  const method = existingRecord ? "PATCH" : "POST";
+  const url = existingRecord
+    ? `${SUPABASE_URL}/rest/v1/${SCORE_TABLE}?player_id=eq.${encodeURIComponent(record.player_id)}`
+    : `${SUPABASE_URL}/rest/v1/${SCORE_TABLE}`;
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(record),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `Score submit failed: ${response.status}`);
+  }
+}
+
+async function fetchLeaderboard(limit = 10) {
+  const params = new URLSearchParams({
+    select: "nickname,survival_seconds,level,path_name,weapons,created_at",
+    order: "survival_seconds.desc,level.desc,created_at.asc",
+    limit: String(limit),
+  });
+
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${SCORE_TABLE}?${params.toString()}`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `Leaderboard fetch failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function closeDomPanel(panel) {
+  if (panel?.parentNode) panel.parentNode.removeChild(panel);
+}
+
+function createPanelShell(title) {
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;background:rgba(2,4,8,0.68);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;font-family:Arial,'Pretendard','Segoe UI',sans-serif;";
+
+  const panel = document.createElement("div");
+  panel.style.cssText = "width:min(520px,calc(100vw - 34px));max-height:82vh;overflow:auto;background:rgba(10,15,24,0.98);border:1px solid rgba(110,231,210,0.65);box-shadow:0 18px 48px rgba(0,0,0,0.48);color:#f8fafc;padding:18px 20px;";
+
+  const header = document.createElement("div");
+  header.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;";
+
+  const titleEl = document.createElement("div");
+  titleEl.textContent = title;
+  titleEl.style.cssText = "font-weight:900;font-size:18px;color:#6ee7d2;letter-spacing:1px;";
+
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "X";
+  closeBtn.style.cssText = "width:32px;height:32px;background:transparent;border:1px solid rgba(255,255,255,0.28);color:#fff;cursor:pointer;";
+  closeBtn.addEventListener("click", () => closeDomPanel(overlay));
+
+  header.appendChild(titleEl);
+  header.appendChild(closeBtn);
+  panel.appendChild(header);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  return { overlay, panel };
+}
+
+function showNicknamePrompt(onDone = null) {
+  if (nicknamePromptEl?.isConnected) return;
+  nicknamePromptEl = null;
+  const { overlay, panel } = createPanelShell("플레이어 이름");
+  nicknamePromptEl = overlay;
+
+  const desc = document.createElement("div");
+  desc.textContent = "플레이 기록과 랭킹에 표시될 닉네임을 입력하세요.";
+  desc.style.cssText = "font-size:13px;color:#aeb7c2;margin-bottom:12px;line-height:1.5;";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 16;
+  input.placeholder = "닉네임";
+  input.value = getPlayerProfile()?.nickname || "";
+  input.style.cssText = "width:100%;box-sizing:border-box;background:#0f1723;border:1px solid rgba(110,231,210,0.55);color:#fff;padding:11px 12px;font-size:16px;outline:none;margin-bottom:12px;";
+
+  const saveBtn = document.createElement("button");
+  saveBtn.textContent = "저장";
+  saveBtn.style.cssText = "width:100%;background:#102933;border:1px solid #6ee7d2;color:#6ee7d2;padding:11px 12px;font-weight:900;cursor:pointer;";
+
+  const save = () => {
+    const profile = ensurePlayerProfile(input.value);
+    if (!profile) {
+      input.style.borderColor = "#ff6666";
+      input.focus();
+      return;
+    }
+    closeDomPanel(overlay);
+    nicknamePromptEl = null;
+    onDone?.(profile);
+  };
+
+  saveBtn.addEventListener("click", save);
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") save(); });
+
+  panel.appendChild(desc);
+  panel.appendChild(input);
+  panel.appendChild(saveBtn);
+  input.focus();
+}
+
+function showPlayerPanel() {
+  closeDomPanel(profilePanelEl);
+  const { overlay, panel } = createPanelShell("PLAYER RECORD");
+  profilePanelEl = overlay;
+
+  const profile = getPlayerProfile();
+  const best = getPersonalBest();
+  const body = document.createElement("div");
+  body.style.cssText = "display:grid;gap:8px;font-size:14px;color:#d8deea;";
+  body.innerHTML = `
+    <div><strong style="color:#fff">Nickname</strong> &nbsp; ${escapeHtml(profile?.nickname || "Not set")}</div>
+    <div><strong style="color:#fff">Best Time</strong> &nbsp; ${best ? formatSurvivalTime(best.survival_seconds) : "-"}</div>
+    <div><strong style="color:#fff">Best Level</strong> &nbsp; ${best?.level || "-"}</div>
+    <div><strong style="color:#fff">Best Path</strong> &nbsp; ${escapeHtml(best?.path_name || "-")}</div>
+    <div><strong style="color:#fff">Weapons</strong><br><span style="color:#aeb7c2">${escapeHtml(best ? compactWeaponText(best.weapons) : "-")}</span></div>
+  `;
+
+  const editBtn = document.createElement("button");
+  editBtn.textContent = "CHANGE NICKNAME";
+  editBtn.style.cssText = "margin-top:14px;width:100%;background:transparent;border:1px solid rgba(110,231,210,0.65);color:#6ee7d2;padding:10px;cursor:pointer;font-weight:800;";
+  editBtn.addEventListener("click", () => {
+    closeDomPanel(overlay);
+    profilePanelEl = null;
+    showNicknamePrompt();
+  });
+
+  panel.appendChild(body);
+  panel.appendChild(editBtn);
+}
+
+async function showLeaderboardPanel() {
+  closeDomPanel(rankingPanelEl);
+  const { overlay, panel } = createPanelShell("LEADERBOARD");
+  rankingPanelEl = overlay;
+
+  const status = document.createElement("div");
+  status.textContent = "Loading...";
+  status.style.cssText = "font-size:14px;color:#aeb7c2;";
+  panel.appendChild(status);
+
+  try {
+    const rows = await fetchLeaderboard(10);
+    status.remove();
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.textContent = "No records yet.";
+      empty.style.cssText = "color:#aeb7c2;font-size:14px;";
+      panel.appendChild(empty);
+      return;
+    }
+
+    rows.forEach((row, index) => {
+      const item = document.createElement("div");
+      item.style.cssText = "display:grid;grid-template-columns:34px 1fr auto;gap:10px;align-items:start;border-top:1px solid rgba(255,255,255,0.1);padding:11px 0;";
+      item.innerHTML = `
+        <div style="font-weight:900;color:#6ee7d2">#${index + 1}</div>
+        <div>
+          <div style="font-weight:900;color:#fff">${escapeHtml(row.nickname || "PLAYER")}</div>
+          <div style="font-size:12px;color:#aeb7c2">Lv.${row.level || 1} / ${escapeHtml(row.path_name || "No Path")}</div>
+        </div>
+        <div style="font-weight:900;color:#fff">${formatSurvivalTime(row.survival_seconds)}</div>
+      `;
+      panel.appendChild(item);
+    });
+  } catch (error) {
+    status.textContent = "Leaderboard is not ready. Run the Supabase SQL setup first.";
+    status.style.color = "#ffb4a8";
+    console.error(error);
+  }
+}
+
+function createPlayerMetaButtons() {
+  if (document.getElementById("player-meta-buttons")) return;
+  const wrap = document.createElement("div");
+  wrap.id = "player-meta-buttons";
+  wrap.style.cssText = "position:fixed;top:12px;right:12px;display:flex;gap:8px;z-index:99998;font-family:Arial,'Pretendard','Segoe UI',sans-serif;";
+
+  const profileBtn = document.createElement("button");
+  profileBtn.textContent = "PLAYER";
+  profileBtn.style.cssText = "background:rgba(10,14,26,0.84);border:1px solid rgba(110,231,210,0.65);color:#6ee7d2;padding:7px 10px;cursor:pointer;font-weight:800;font-size:12px;";
+  profileBtn.addEventListener("click", showPlayerPanel);
+
+  const rankBtn = document.createElement("button");
+  rankBtn.textContent = "RANK";
+  rankBtn.style.cssText = profileBtn.style.cssText;
+  rankBtn.addEventListener("click", showLeaderboardPanel);
+
+  wrap.appendChild(profileBtn);
+  wrap.appendChild(rankBtn);
+  document.body.appendChild(wrap);
+}
+
+function setPlayerMetaButtonsVisible(visible) {
+  const wrap = document.getElementById("player-meta-buttons");
+  if (wrap) wrap.style.display = visible ? "flex" : "none";
+}
+
+function handleRunEnd(survivalSeconds) {
+  const record = buildRunRecord(survivalSeconds);
+  const previousBest = getPersonalBest();
+  const isNewBest = isBetterRecord(record, previousBest);
+  const best = isNewBest ? record : previousBest;
+  if (isNewBest) savePersonalBest(record);
+
+  if (isNewBest) {
+    submitScore(record).catch((error) => {
+      console.warn("Score submit failed", error);
+    });
+  }
+
+  return { record, best, isNewBest };
 }
 
 // ─────────────────────────────
@@ -1061,6 +1414,8 @@ expInfoText = makeText(this, this.scale.width - 20, 20, "", { fontSize: "15px", 
   updateCameraZoom.call(this, this.scale.width);
   showStartScreen.call(this);
   createDevConsole();
+  createPlayerMetaButtons();
+  if (!getPlayerProfile()) showNicknamePrompt();
 }
 
 function update(time, delta) {
@@ -2530,6 +2885,7 @@ function killPlayer() {
   const deathTexts = ["YOU DIED", "MISSION FAILED", "ERASED", "THE NIGHT CONSUMED YOU"];
   const chosen = Phaser.Utils.Array.GetRandom(deathTexts);
   const surviveTime = Math.floor((this.time.now - gameStartTime) / 1000);
+  const runResult = handleRunEnd(surviveTime);
 
   const overlay = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.75)
     .setOrigin(0).setScrollFactor(0).setDepth(5000);
@@ -2539,11 +2895,14 @@ function killPlayer() {
   makeText(this, this.scale.width / 2, this.scale.height / 2 + 10, `생존 시간 ${surviveTime}초`, {
     fontSize: "24px", color: "#ffffff",
   }).setOrigin(0.5).setScrollFactor(0).setDepth(5001);
+  makeText(this, this.scale.width / 2, this.scale.height / 2 + 40, `${runResult.isNewBest ? "NEW BEST" : "BEST"} ${formatSurvivalTime(runResult.best?.survival_seconds || surviveTime)}`, {
+    fontSize: "16px", color: runResult.isNewBest ? "#6ee7d2" : "#cbd5e1",
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(5001);
 
-  const restartBtnBg = this.add.rectangle(this.scale.width / 2, this.scale.height / 2 + 70, 180, 44, 0xff4444, 0.15)
+  const restartBtnBg = this.add.rectangle(this.scale.width / 2, this.scale.height / 2 + 98, 180, 44, 0xff4444, 0.15)
     .setStrokeStyle(1.5, 0xff4444, 0.75).setScrollFactor(0).setDepth(5001)
     .setInteractive({ useHandCursor: true });
-  const restartBtnText = makeText(this, this.scale.width / 2, this.scale.height / 2 + 70, "RESTART", {
+  const restartBtnText = makeText(this, this.scale.width / 2, this.scale.height / 2 + 98, "RESTART", {
     fontSize: "18px", color: "#ff4444", fontStyle: "bold", letterSpacing: 4,
   }).setOrigin(0.5).setScrollFactor(0).setDepth(5002).setInteractive({ useHandCursor: true });
 
@@ -2563,6 +2922,7 @@ function showStartScreen() {
   this.physics.pause();
   spawnTimer.paused = true; enemyHealthTimer.paused = true; enemyHealthPercentTimer.paused = true; enemySpawnGrowthTimer.paused = true;
   isChoosingWeapon = true;
+  setPlayerMetaButtonsVisible(true);
 
   const W = this.scale.width, H = this.scale.height, cx = W / 2, cy = H / 2;
   const compact = W < 680 || H < 620;
@@ -2592,6 +2952,15 @@ function showStartScreen() {
   });
 
   const startGame = () => {
+    if (!getPlayerProfile()) {
+      showNicknamePrompt();
+      return;
+    }
+    setPlayerMetaButtonsVisible(false);
+    closeDomPanel(profilePanelEl);
+    closeDomPanel(rankingPanelEl);
+    profilePanelEl = null;
+    rankingPanelEl = null;
     objs.forEach((obj) => obj.destroy());
     this.physics.resume(); spawnTimer.paused = false; enemyHealthTimer.paused = false; enemyHealthPercentTimer.paused = false; enemySpawnGrowthTimer.paused = false;
     isChoosingWeapon = false; gameStartTime = this.time.now;
