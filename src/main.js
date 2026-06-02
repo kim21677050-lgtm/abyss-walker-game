@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 
-const MAX_ENEMIES = 250;
+const MAX_ENEMIES = 350;
 const INITIAL_ENEMY_COUNT = 12;
 const INITIAL_SPAWN_DELAY = 420;
 const MIN_SPAWN_DELAY = 130;
@@ -9,6 +9,9 @@ const ENEMY_HEALTH_FLAT_INTERVAL = 45000;
 const ENEMY_HEALTH_FLAT_INCREASE = 5;
 const ENEMY_HEALTH_GROWTH_INTERVAL = 120000;
 const ENEMY_HEALTH_GROWTH_MULTIPLIER = 1.15;
+const SPECIAL_ENEMY_START_SECONDS = 300;
+const SPECIAL_ENEMY_INITIAL_RATE = 0.15;
+const SPECIAL_ENEMY_RATE_PER_MINUTE = 0.02;
 const PATH_SELECT_LEVEL = 15; // 길 선택 레벨
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://aezpthrsvtatfonhtvlo.supabase.co";
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_E_uydK1TiiUidl2z507RCQ_wOJ-xy9C";
@@ -144,6 +147,7 @@ let isDead = false, lastDamageTime = 0;
 const CONTACT_DAMAGE_PER_SEC = 34;
 let gameStartTime = 0;
 let devMode = false, devPanelEl = null, gameSceneRef = null;
+let devTimeAdjustedThisRun = false;
 let devPendingLevelChoice = false;
 let timerText = null, devBtnEl = null, lastMoveAngle = 0;
 let bgChunks = new Map();
@@ -516,6 +520,10 @@ function setPlayerMetaButtonsVisible(visible) {
 function handleRunEnd(survivalSeconds) {
   const record = buildRunRecord(survivalSeconds);
   const previousBest = getPersonalBest();
+  if (devTimeAdjustedThisRun) {
+    return { record, best: previousBest || record, isNewBest: false, rankDisabled: true };
+  }
+
   const isNewBest = isBetterRecord(record, previousBest);
   const best = isNewBest ? record : previousBest;
   if (isNewBest) savePersonalBest(record);
@@ -537,6 +545,7 @@ function setInternalSurvivalTime(seconds) {
   if (!gameSceneRef) return;
 
   const targetSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  devTimeAdjustedThisRun = true;
   gameStartTime = gameSceneRef.time.now - targetSeconds * 1000;
   elapsedSeconds = Math.floor(targetSeconds / 10) * 10;
   enemyMaxHp = getEnemyMaxHpAtTime(targetSeconds);
@@ -551,8 +560,8 @@ function setInternalSurvivalTime(seconds) {
   }
   enemies?.getChildren().forEach((enemy) => {
     if (!enemy.active) return;
-    enemy.maxHp = enemyMaxHp;
-    enemy.hp = Math.min(enemy.hp || enemyMaxHp, enemyMaxHp);
+    enemy.maxHp = getEnemyMaxHpForType(enemy.enemyType);
+    enemy.hp = Math.min(enemy.hp || enemy.maxHp, enemy.maxHp);
   });
 
   if (timerText) {
@@ -573,7 +582,7 @@ function getExpRequirementForLevel(targetLevel) {
 }
 
 function getNextExpIncrease(currentRequirement) {
-  return Math.max(10, Math.floor(currentRequirement * 0.2 + 0.2));
+  return Math.max(15, Math.floor(currentRequirement * 0.25 + 0.2));
 }
 
 function getEnemySpawnGrowthRate(seconds) {
@@ -974,7 +983,7 @@ class ScytheWeapon extends AutoWeapon {
   swing(time) {
     const range = 250;
     const baseAngle = lastMoveAngle - Math.PI * 0.85;
-    const damage = 11.0;
+    const damage = 10.7;
     const hitCooldown = new Map();
     const scythe = this.scene.add.image(player.x, player.y, "death-scythe")
       .setDisplaySize(range * 1.65, range * 1.65)
@@ -1431,21 +1440,21 @@ function update(time, delta) {
 
     if (enemy.fleeing) {
       const angle = Phaser.Math.Angle.Between(player.x, player.y, enemy.x, enemy.y);
-      this.physics.velocityFromAngle(Phaser.Math.RadToDeg(angle), 130, enemy.body.velocity);
+      this.physics.velocityFromAngle(Phaser.Math.RadToDeg(angle), enemy.fleeSpeed || 130, enemy.body.velocity);
       enemy.setFlipX(player.x > enemy.x);
       return;
     }
 
     if (enemy.stunnedUntil && enemy.stunnedUntil > time) {
       if (enemy.slowed) {
-        this.physics.moveToObject(enemy, player, 45);
+        this.physics.moveToObject(enemy, player, enemy.slowedSpeed || 45);
       } else {
         enemy.body.setVelocity(0, 0);
       }
       return;
     }
 
-    this.physics.moveToObject(enemy, player, 95);
+    this.physics.moveToObject(enemy, player, enemy.moveSpeed || 95);
     enemy.setFlipX(player.x < enemy.x);
   });
 
@@ -2456,37 +2465,75 @@ function formatDamage(value) {
 
 function getWeaponDamage(type, level) {
   const damageTable = {
-    machineGun: [0.7, 0.9, 1.1, 1.3, 1.6],
-    magicMissile: [2.2, 2.7, 3.2, 3.8, 4.5],
-    lightning: [2.5, 3.1, 3.7, 4.4, 5.2],
-    sword: [1.6, 2.1, 2.6, 3.1, 3.8],
-    laser: [2.4, 3.0, 3.6, 4.3, 5.0],
-    skull: [3.0, 3.8, 4.6, 5.5, 6.5],
-    lung: [2.8, 3.5, 4.2, 5.2, 6.2],
-    scythe: [4.0, 5.0, 6.0, 7.2, 8.5],
-    blackHole: [3.5, 4.5, 5.5, 6.8, 8.2],
-    boomerang: [2.0, 2.6, 3.2, 4.0, 4.8],
-    chain: [1.8, 2.3, 2.8, 3.4, 4.2],
+    machineGun: [0.7, 1.3, 1.9, 2.5, 3.4],
+    magicMissile: [2.2, 3.7, 5.2, 7.6, 11.2],
+    lightning: [2.5, 4.3, 6.1, 8.2, 11.5],
+    sword: [1.6, 3.1, 4.6, 6.1, 8.2],
+    laser: [2.4, 4.2, 6.0, 8.1, 10.2],
+    skull: [3.0, 5.4, 7.8, 10.5, 13.5],
+    lung: [2.8, 4.9, 6.4, 9.4, 12.4],
+    scythe: [3.7, 7.6, 10.6, 14.2, 18.1],
+    blackHole: [3.2, 7.1, 10.1, 14.0, 18.2],
+    boomerang: [2.0, 3.8, 5.6, 8.0, 10.4],
+    chain: [1.8, 3.3, 4.8, 6.0, 9.0],
   };
   return damageTable[type][Math.min(level, 5) - 1];
 }
 
 // ─── 적 스폰 ────────────────────────────────────────────
+const ENEMY_TYPES = {
+  normal: { id: "normal", name: "일반", hpMultiplier: 1, tint: null, displaySize: 64, speed: 95, fleeSpeed: 130, slowedSpeed: 45 },
+  goblin: { id: "goblin", name: "고블린", hpMultiplier: 2, tint: 0x77ff66, displaySize: 72, speed: 88, fleeSpeed: 120, slowedSpeed: 42 },
+  bat: { id: "bat", name: "박쥐", hpMultiplier: 1.1, tint: 0x99aaff, displaySize: 52, speed: 118, fleeSpeed: 150, slowedSpeed: 55 },
+};
+
+function getCurrentSurvivalSeconds() {
+  if (!gameSceneRef || !gameStartTime) return 0;
+  return Math.max(0, Math.floor((gameSceneRef.time.now - gameStartTime) / 1000));
+}
+
+function getSpecialEnemyRate(seconds = getCurrentSurvivalSeconds()) {
+  if (seconds < SPECIAL_ENEMY_START_SECONDS) return 0;
+  const minutesAfterStart = Math.floor((seconds - SPECIAL_ENEMY_START_SECONDS) / 60);
+  return Math.min(0.9, SPECIAL_ENEMY_INITIAL_RATE + minutesAfterStart * SPECIAL_ENEMY_RATE_PER_MINUTE);
+}
+
+function chooseEnemyType(seconds = getCurrentSurvivalSeconds()) {
+  const specialRate = getSpecialEnemyRate(seconds);
+  if (Math.random() >= specialRate) return ENEMY_TYPES.normal;
+  return Math.random() < 0.5 ? ENEMY_TYPES.goblin : ENEMY_TYPES.bat;
+}
+
+function getEnemyMaxHpForType(enemyTypeId = "normal", baseHp = enemyMaxHp) {
+  const type = ENEMY_TYPES[enemyTypeId] || ENEMY_TYPES.normal;
+  return Math.ceil(baseHp * type.hpMultiplier);
+}
+
 function spawnEnemy() {
   if (enemies.getLength() >= MAX_ENEMIES) return;
   const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
   const distance = 1200;
   const x = player.x + Math.cos(angle) * distance;
   const y = player.y + Math.sin(angle) * distance;
+  const enemyType = chooseEnemyType();
   const enemy = this.physics.add.sprite(x, y, "enemy_walk");
-  enemy.setDisplaySize(64, 64);  // 게임 내 표시 크기
+  enemy.enemyType = enemyType.id;
+  enemy.enemyName = enemyType.name;
+  enemy.hpMultiplier = enemyType.hpMultiplier;
+  enemy.moveSpeed = enemyType.speed;
+  enemy.fleeSpeed = enemyType.fleeSpeed;
+  enemy.slowedSpeed = enemyType.slowedSpeed;
+  enemy.baseTint = enemyType.tint;
+  enemy.setDisplaySize(enemyType.displaySize, enemyType.displaySize);
+  if (enemyType.tint) enemy.setTint(enemyType.tint);
   enemy.play("enemy_walk");
 
   if (player.x < enemy.x) {
   enemy.setFlipX(true);  // 플레이어가 왼쪽에 있으면 뒤집기
 }
 
-  enemy.maxHp = enemyMaxHp; enemy.hp = enemy.maxHp;
+  enemy.maxHp = getEnemyMaxHpForType(enemy.enemyType);
+  enemy.hp = enemy.maxHp;
   enemy.burnUntil = 0; enemy.stunnedUntil = 0;
   enemies.add(enemy);
 }
@@ -2504,8 +2551,10 @@ function increaseEnemyMaxHp() {
   enemyMaxHp += ENEMY_HEALTH_FLAT_INCREASE;
   enemies.getChildren().forEach((enemy) => {
     if (!enemy.active) return;
-    enemy.maxHp = (enemy.maxHp || enemyMaxHp - ENEMY_HEALTH_FLAT_INCREASE) + ENEMY_HEALTH_FLAT_INCREASE;
-    enemy.hp = Math.min(enemy.maxHp, enemy.hp + ENEMY_HEALTH_FLAT_INCREASE);
+    const previousEnemyMaxHp = enemy.maxHp || getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp - ENEMY_HEALTH_FLAT_INCREASE);
+    const nextEnemyMaxHp = getEnemyMaxHpForType(enemy.enemyType);
+    enemy.maxHp = nextEnemyMaxHp;
+    enemy.hp = Math.min(nextEnemyMaxHp, (enemy.hp || 0) + Math.max(1, nextEnemyMaxHp - previousEnemyMaxHp));
     showEnemyGrowthPulse.call(this, enemy.x, enemy.y);
   });
 }
@@ -2895,8 +2944,10 @@ function killPlayer() {
   makeText(this, this.scale.width / 2, this.scale.height / 2 + 10, `생존 시간 ${surviveTime}초`, {
     fontSize: "24px", color: "#ffffff",
   }).setOrigin(0.5).setScrollFactor(0).setDepth(5001);
-  makeText(this, this.scale.width / 2, this.scale.height / 2 + 40, `${runResult.isNewBest ? "NEW BEST" : "BEST"} ${formatSurvivalTime(runResult.best?.survival_seconds || surviveTime)}`, {
-    fontSize: "16px", color: runResult.isNewBest ? "#6ee7d2" : "#cbd5e1",
+  makeText(this, this.scale.width / 2, this.scale.height / 2 + 40, runResult.rankDisabled
+    ? "RANK DISABLED - DEV TIME USED"
+    : `${runResult.isNewBest ? "NEW BEST" : "BEST"} ${formatSurvivalTime(runResult.best?.survival_seconds || surviveTime)}`, {
+    fontSize: "16px", color: runResult.rankDisabled ? "#ffb4a8" : (runResult.isNewBest ? "#6ee7d2" : "#cbd5e1"),
   }).setOrigin(0.5).setScrollFactor(0).setDepth(5001);
 
   const restartBtnBg = this.add.rectangle(this.scale.width / 2, this.scale.height / 2 + 98, 180, 44, 0xff4444, 0.15)
@@ -2910,6 +2961,7 @@ function killPlayer() {
     isDead = false; exp = 0; level = 1; expToNextLevel = 5;
     playerHp = 100; playerMaxHp = 100;
     enemyMaxHp = 3; enemySpawnBonus = 0; enemySpawnRemainder = 0;
+    devTimeAdjustedThisRun = false;
     playerVelocity.x = 0; playerVelocity.y = 0;
     this.scene.restart();
   };
@@ -2963,7 +3015,7 @@ function showStartScreen() {
     rankingPanelEl = null;
     objs.forEach((obj) => obj.destroy());
     this.physics.resume(); spawnTimer.paused = false; enemyHealthTimer.paused = false; enemyHealthPercentTimer.paused = false; enemySpawnGrowthTimer.paused = false;
-    isChoosingWeapon = false; gameStartTime = this.time.now;
+    isChoosingWeapon = false; gameStartTime = this.time.now; devTimeAdjustedThisRun = false;
   };
 
   btnBg.on("pointerdown", startGame); btnText.on("pointerdown", startGame);
