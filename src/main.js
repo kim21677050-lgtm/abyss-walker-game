@@ -229,6 +229,10 @@ function responsiveScale(scene, min = 0.72, max = 1) {
   return Phaser.Math.Clamp(Math.min(w / 980, h / 720), min, max);
 }
 
+function isPortraitMobile(width, height) {
+  return width < 720 && height > width;
+}
+
 function createGlassPanel(scene, x, y, width, height, accent = UI.cyan, alpha = 0.94) {
   const outer = scene.add.rectangle(x, y, width, height, UI.panelDark, alpha)
     .setStrokeStyle(1.5, accent, 0.62);
@@ -1714,10 +1718,10 @@ expInfoText = makeText(this, this.scale.width - 20, 20, "", { fontSize: "15px", 
   this.scale.on("resize", (gameSize) => {
     layoutHud(this, gameSize.width, gameSize.height);
     layoutJoystick(this, gameSize.width, gameSize.height);
-    updateCameraZoom.call(this, gameSize.width);
+    updateCameraZoom.call(this, gameSize.width, gameSize.height);
   });
 
-  updateCameraZoom.call(this, this.scale.width);
+  updateCameraZoom.call(this, this.scale.width, this.scale.height);
   showStartScreen.call(this);
   createDevConsole();
   createPlayerMetaButtons();
@@ -2292,13 +2296,14 @@ function showWeaponSelection() {
   const W = this.scale.width, H = this.scale.height;
   const cx = W / 2, cy = H / 2;
   const shade = this.add.rectangle(0, 0, W, H, 0x03060a, 0.78).setOrigin(0);
+  const isPortrait = isPortraitMobile(W, H);
   const isCompact = W < 760 || H < 620;
   const cardBaseW = 220, cardBaseH = 276;
-  const gap = isCompact ? 8 : 18;
-  const cardScale = isCompact
-    ? Phaser.Math.Clamp(Math.min((W - 34) / cardBaseW, (H - 106) / (cardBaseH * options.length + gap * (options.length - 1))), 0.54, 0.86)
+  const gap = isPortrait ? 10 : (isCompact ? 8 : 18);
+  const cardScale = (isCompact || isPortrait)
+    ? Phaser.Math.Clamp(Math.min((W - 34) / cardBaseW, (H - (isPortrait ? 118 : 106)) / (cardBaseH * options.length + gap * (options.length - 1))), 0.56, isPortrait ? 0.8 : 0.86)
     : Phaser.Math.Clamp((W - 72) / (cardBaseW * options.length + gap * (options.length - 1)), 0.76, 1);
-  const titleY = isCompact ? 28 : cy - 184;
+  const titleY = (isCompact || isPortrait) ? 28 : cy - 184;
 
   const title = makeText(this, cx, titleY, "선택", {
     fontSize: `${isCompact ? 22 : 34}px`, color: UI.text, fontStyle: "800",
@@ -2326,11 +2331,11 @@ function showWeaponSelection() {
   };
 
   options.forEach((option, index) => {
-    const x = isCompact
+    const x = (isCompact || isPortrait)
       ? cx
       : cx + (index - (options.length - 1) / 2) * ((cardBaseW + gap) * cardScale);
-    const y = isCompact
-      ? 78 + (cardBaseH * cardScale) / 2 + index * ((cardBaseH + gap) * cardScale)
+    const y = (isCompact || isPortrait)
+      ? (isPortrait ? 86 : 78) + (cardBaseH * cardScale) / 2 + index * ((cardBaseH + gap) * cardScale)
       : cy + 28;
 
     let card;
@@ -2817,29 +2822,34 @@ function updateExpHud() {
 function layoutHud(scene, width = scene.scale.width, height = scene.scale.height) {
   const padding = Math.max(14, Math.min(24, width * 0.035));
   const compact = width < 640;
+  const portrait = isPortraitMobile(width, height);
   const safeWidth = Math.max(150, width - padding * 2);
 
   levelText.setPosition(padding, padding).setFontSize(compact ? "18px" : "24px");
   timerText.setPosition(width / 2, padding).setFontSize(compact ? "17px" : "22px");
-  expInfoText.setPosition(width - padding, padding).setFontSize(compact ? "12px" : "15px");
-  expInfoText.setWordWrapWidth(Math.floor(safeWidth * 0.34));
+  expInfoText.setPosition(width - padding, portrait ? padding + 26 : padding).setFontSize(compact ? "12px" : "15px");
+  expInfoText.setWordWrapWidth(Math.floor(portrait ? safeWidth * 0.46 : safeWidth * 0.34));
 
-  weaponText.setPosition(padding, compact ? height - 76 : padding + 42).setFontSize(compact ? "12px" : "15px");
-  weaponText.setWordWrapWidth(compact ? Math.floor(safeWidth) : Math.floor(safeWidth * 0.58));
+  weaponText.setPosition(padding, portrait ? padding + 82 : (compact ? height - 76 : padding + 42)).setFontSize(compact ? "11px" : "15px");
+  weaponText.setWordWrapWidth(portrait ? Math.floor(safeWidth * 0.92) : (compact ? Math.floor(safeWidth) : Math.floor(safeWidth * 0.58)));
   weaponText.setDepth(1000);
   scene.cameras.main.setViewport(0, 0, width, height);
 
-  healthBarWidth = compact ? Math.min(150, width * 0.38) : 180;
+  healthBarWidth = portrait ? Math.min(138, width * 0.36) : (compact ? Math.min(150, width * 0.38) : 180);
   const healthX = compact ? width - padding - healthBarWidth : width - padding - healthBarWidth;
-  const healthY = compact ? padding + 48 : padding + 52;
+  const healthY = portrait ? padding + 58 : (compact ? padding + 48 : padding + 52);
   healthBarBg.setPosition(healthX, healthY).setSize(healthBarWidth, compact ? 9 : 10);
   healthBarGreen.setPosition(healthX, healthY).setSize(healthBarWidth, compact ? 9 : 10);
   healthBarRed.setPosition(healthX, healthY).setSize(healthBarWidth, compact ? 9 : 10);
   updateHealthBar();
 }
 
-function updateCameraZoom(width) {
-  this.cameras.main.setZoom(width < 640 ? 0.86 : 1.05);
+function updateCameraZoom(width, height = this.scale.height) {
+  if (isPortraitMobile(width, height)) {
+    this.cameras.main.setZoom(0.74);
+  } else {
+    this.cameras.main.setZoom(width < 640 ? 0.86 : 1.05);
+  }
 }
 
 function formatDamage(value) {
@@ -3435,30 +3445,31 @@ function showStartScreen() {
   if (!WEAPON_TYPES.some((weapon) => weapon.id === selectedStartWeaponType)) selectedStartWeaponType = "machineGun";
 
   const W = this.scale.width, H = this.scale.height, cx = W / 2, cy = H / 2;
+  const portrait = isPortraitMobile(W, H);
   const compact = W < 680 || H < 620;
-  const scale = responsiveScale(this, 0.78, 1);
-  const titleY = compact ? Math.max(112, H * 0.28) : cy - 82;
-  const weaponCols = compact ? 3 : 4;
+  const scale = responsiveScale(this, portrait ? 0.68 : 0.78, 1);
+  const titleY = portrait ? Math.max(104, Math.min(150, H * 0.18)) : (compact ? Math.max(112, H * 0.28) : cy - 82);
+  const weaponCols = portrait ? 2 : (compact ? 3 : 4);
   const weaponRows = Math.ceil(WEAPON_TYPES.length / weaponCols);
-  const weaponStartY = compact ? titleY + 126 * scale : titleY + 166 * scale;
-  const weaponRowH = compact ? 30 : 34;
-  const buttonY = Math.min(H - 92, weaponStartY + weaponRows * weaponRowH + 34);
+  const weaponStartY = portrait ? titleY + 128 * scale : (compact ? titleY + 126 * scale : titleY + 166 * scale);
+  const weaponRowH = portrait ? 36 : (compact ? 30 : 34);
+  const buttonY = portrait ? Math.min(H - 104, weaponStartY + weaponRows * weaponRowH + 42) : Math.min(H - 92, weaponStartY + weaponRows * weaponRowH + 34);
   const objs = [];
   const bg = this.add.rectangle(0, 0, W, H, 0x03060a, 0.9).setOrigin(0).setScrollFactor(0).setDepth(9000);
   const vignette = this.add.circle(cx, cy, Math.max(W, H) * 0.58, 0x183348, 0.16).setScrollFactor(0).setDepth(9000);
   const lineTop = this.add.rectangle(cx, titleY - 62 * scale, Math.min(360, W - 52), 1, UI.cyan, 0.45).setScrollFactor(0).setDepth(9001);
-  const title1 = makeText(this, cx, titleY, "ABYSS", { fontSize: `${compact ? 52 : 72}px`, color: "#48f5d7", fontStyle: "900" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
-  const title2 = makeText(this, cx, titleY + 54 * scale, "WALKER", { fontSize: `${compact ? 30 : 42}px`, color: "#f7fbff", fontStyle: "800" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const title1 = makeText(this, cx, titleY, "ABYSS", { fontSize: `${portrait ? 46 : (compact ? 52 : 72)}px`, color: "#48f5d7", fontStyle: "900" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
+  const title2 = makeText(this, cx, titleY + 54 * scale, "WALKER", { fontSize: `${portrait ? 27 : (compact ? 30 : 42)}px`, color: "#f7fbff", fontStyle: "800" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
   const lineBot = this.add.rectangle(cx, titleY + 88 * scale, Math.min(320, W - 72), 1, UI.cyan, 0.45).setScrollFactor(0).setDepth(9001);
   const sub = makeText(this, cx, titleY + 116 * scale, "어둠 속을 걸어라", { fontSize: `${compact ? 13 : 16}px`, color: "#9fe8dc" }).setOrigin(0.5).setScrollFactor(0).setDepth(9001);
-  const btnW = Math.min(compact ? W - 72 : 240, 280);
+  const btnW = Math.min(portrait ? W - 64 : (compact ? W - 72 : 240), 280);
   const btnBg = this.add.rectangle(cx, buttonY, btnW, 54, 0x102933, 0.92).setStrokeStyle(2, UI.cyan, 0.85).setScrollFactor(0).setDepth(9002).setInteractive({ useHandCursor: true });
   const btnGlow = this.add.rectangle(cx, buttonY, btnW - 10, 44, UI.cyan, 0.08).setScrollFactor(0).setDepth(9002);
   const btnText = makeText(this, cx, buttonY, "ENTER THE ABYSS", { fontSize: `${compact ? 13 : 15}px`, color: "#48f5d7", fontStyle: "800" }).setOrigin(0.5).setScrollFactor(0).setDepth(9003).setInteractive({ useHandCursor: true });
   const weaponLabel = makeText(this, cx, weaponStartY - 28, "시작 무기 선택", { fontSize: `${compact ? 12 : 14}px`, color: "#f7fbff", fontStyle: "800" }).setOrigin(0.5).setScrollFactor(0).setDepth(9002);
-  const weaponButtonW = compact ? Math.min(86, (W - 64) / weaponCols) : 112;
-  const weaponButtonH = compact ? 24 : 28;
-  const weaponGap = compact ? 6 : 8;
+  const weaponButtonW = portrait ? Math.min(132, (W - 56) / weaponCols) : (compact ? Math.min(86, (W - 64) / weaponCols) : 112);
+  const weaponButtonH = portrait ? 30 : (compact ? 24 : 28);
+  const weaponGap = portrait ? 10 : (compact ? 6 : 8);
   const weaponGridW = weaponCols * weaponButtonW + (weaponCols - 1) * weaponGap;
   const weaponButtons = [];
   const refreshWeaponButtons = () => {
@@ -3478,7 +3489,7 @@ function showStartScreen() {
     const weaponBg = this.add.rectangle(wx, wy, weaponButtonW, weaponButtonH, 0x07131e, 0.74)
       .setScrollFactor(0).setDepth(9002).setInteractive({ useHandCursor: true });
     const weaponText = makeText(this, wx, wy, `${weapon.icon} ${weapon.name}`, {
-      fontSize: `${compact ? 10 : 11}px`, color: "#b7c9d8", fontStyle: "800",
+      fontSize: `${portrait ? 11 : (compact ? 10 : 11)}px`, color: "#b7c9d8", fontStyle: "800",
       strokeThickness: 2,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(9003).setInteractive({ useHandCursor: true });
     const selectWeapon = () => {
