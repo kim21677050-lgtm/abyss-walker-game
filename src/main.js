@@ -14,6 +14,7 @@ const SPECIAL_ENEMY_INITIAL_RATE = 0.15;
 const SPECIAL_ENEMY_RATE_PER_MINUTE = 0.02;
 const PLAYER_BASE_CRIT_CHANCE = 0.05;
 const PLAYER_CRIT_DAMAGE_MULTIPLIER = 5;
+const EXP_ORB_LIFETIME_MS = 60000;
 const PATH_SELECT_LEVEL = 15; // 길 선택 레벨
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://aezpthrsvtatfonhtvlo.supabase.co";
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_E_uydK1TiiUidl2z507RCQ_wOJ-xy9C";
@@ -2655,14 +2656,14 @@ function movePlayer() {
   if (cursors.down.isDown)  dy += 1;
   if (joystick?.active) { dx += joystick.vector.x; dy += joystick.vector.y; }
   const len = Math.sqrt(dx * dx + dy * dy);
-  if (len > 1) { dx /= len; dy /= len; }
-
-  if (dx !== 0 || dy !== 0) {
-    playerVelocity.x = dx * maxSpeed; playerVelocity.y = dy * maxSpeed;
+  if (len > 0.001) {
+    dx /= len;
+    dy /= len;
+    playerVelocity.x = dx * maxSpeed;
+    playerVelocity.y = dy * maxSpeed;
   } else {
-    playerVelocity.x *= 0.7; playerVelocity.y *= 0.7;
-    if (Math.abs(playerVelocity.x) < 5) playerVelocity.x = 0;
-    if (Math.abs(playerVelocity.y) < 5) playerVelocity.y = 0;
+    playerVelocity.x = 0;
+    playerVelocity.y = 0;
   }
 
   player.body.setVelocity(playerVelocity.x, playerVelocity.y);
@@ -2679,9 +2680,15 @@ function movePlayer() {
 }
 
 function pullExpOrbs() {
+  const now = this.time.now;
   const pullRange = 225 * getPickupRangeMultiplier();
   const pullRangeSq = pullRange * pullRange;
   expOrbs.getChildren().forEach((orb) => {
+    if (!orb.active) return;
+    if (now - (orb.spawnedAt || now) >= EXP_ORB_LIFETIME_MS) {
+      orb.destroy();
+      return;
+    }
     const dx = player.x - orb.x, dy = player.y - orb.y;
     if (dx * dx + dy * dy < pullRangeSq)
       this.physics.moveToObject(orb, player, 520);
@@ -3067,8 +3074,12 @@ if (enemy.hp <= 0) {
 function spawnExpOrb(x, y) {
   if (Math.random() >= 0.75) return;
   const orb = this.add.circle(x, y, 7, 0x66ccff);
+  orb.spawnedAt = this.time.now;
   this.physics.add.existing(orb);
   expOrbs.add(orb);
+  this.time.delayedCall(EXP_ORB_LIFETIME_MS, () => {
+    if (orb.active) orb.destroy();
+  });
 }
 
 function explode(x, y, radius, damage = 1, options = {}) {
