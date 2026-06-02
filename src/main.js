@@ -582,22 +582,85 @@ class ScytheWeapon extends AutoWeapon {
     weaponManager.countCast(() => this.tick(time));
   }
   swing(time) {
-    const range = 250, baseAngle = lastMoveAngle - Math.PI * 0.75;
+    const range = 250;
+    const baseAngle = lastMoveAngle - Math.PI * 0.85;
+    const damage = 11.0;
+    const hitCooldown = new Map();
     const scythe = this.scene.add.image(player.x, player.y, "death-scythe")
-      .setDisplaySize(range * 2.2, range * 2.2).setDepth(29).setAlpha(1).setOrigin(0.15, 0.85).setRotation(baseAngle);
+      .setDisplaySize(range * 1.65, range * 1.65)
+      .setDepth(29)
+      .setAlpha(1)
+      .setOrigin(0.17, 0.78)
+      .setRotation(baseAngle);
+
+    const hitboxSpecs = [
+      { distance: 118, angleOffset: 0.00, radius: 28 },
+      { distance: 155, angleOffset: -0.05, radius: 38 },
+      { distance: 188, angleOffset: -0.16, radius: 42 },
+      { distance: 214, angleOffset: -0.34, radius: 34 },
+      { distance: 224, angleOffset: -0.56, radius: 26 },
+    ];
+    const hitboxes = hitboxSpecs.map((spec) => {
+      const hitbox = this.scene.add.circle(player.x, player.y, spec.radius, 0x88ffcc, 0).setDepth(28);
+      this.scene.physics.add.existing(hitbox);
+      hitbox.body.setAllowGravity(false);
+      hitbox.body.setImmovable(true);
+      hitbox.body.setCircle(spec.radius);
+      hitbox._scytheSpec = spec;
+      return hitbox;
+    });
+
+    const syncScythe = (angle) => {
+      scythe.setPosition(player.x, player.y);
+      scythe.setRotation(angle);
+
+      hitboxes.forEach((hitbox) => {
+        const spec = hitbox._scytheSpec;
+        const hitAngle = angle + spec.angleOffset;
+        hitbox.setPosition(
+          player.x + Math.cos(hitAngle) * spec.distance,
+          player.y + Math.sin(hitAngle) * spec.distance
+        );
+        hitbox.body.updateFromGameObject();
+      });
+    };
+
+    syncScythe(baseAngle);
+
+    const overlaps = hitboxes.map((hitbox) => this.scene.physics.add.overlap(hitbox, enemies, (_, enemy) => {
+      if (!enemy.active) return;
+      const now = this.scene.time.now;
+      if ((hitCooldown.get(enemy) || 0) + 180 > now) return;
+      hitCooldown.set(enemy, now);
+      damageEnemy.call(this.scene, enemy, damage);
+      if (this.level >= 4 && enemy.active) {
+        enemy.burnUntil = Math.max(enemy.burnUntil || 0, now + 1200);
+      }
+    }));
+
     const startTime = this.scene.time.now, duration = 900, savedAngle = baseAngle;
     let followTimer = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
-      if (!scythe.active) { followTimer.destroy(); return; }
-      scythe.setPosition(player.x, player.y);
+      if (!scythe.active || hitboxes.some((hitbox) => !hitbox.active)) {
+        followTimer.destroy();
+        overlaps.forEach((overlap) => overlap.destroy());
+        hitboxes.forEach((hitbox) => { if (hitbox.active) hitbox.destroy(); });
+        return;
+      }
       const elapsed = this.scene.time.now - startTime, progress = Math.min(elapsed / duration, 1);
-      scythe.setRotation(savedAngle + Math.PI * 2 * progress);
-      if (progress >= 1) { followTimer.destroy(); this.scene.tweens.add({ targets: scythe, alpha: 0, duration: 150, onComplete: () => scythe.destroy() }); }
+      const angle = savedAngle + Math.PI * 2 * progress;
+      syncScythe(angle);
+      if (progress >= 1) {
+        followTimer.destroy();
+        overlaps.forEach((overlap) => overlap.destroy());
+        hitboxes.forEach((hitbox) => hitbox.destroy());
+        this.scene.tweens.add({ targets: scythe, alpha: 0, duration: 150, onComplete: () => scythe.destroy() });
+      }
     }});
-    const ring = this.scene.add.circle(player.x, player.y, range, 0xccffaa, 0).setStrokeStyle(3, 0xccffaa, 0.6).setDepth(27);
+
+    const ring = this.scene.add.circle(player.x, player.y, range, 0xccffaa, 0).setStrokeStyle(3, 0xccffaa, 0.35).setDepth(27);
     this.scene.tweens.add({ targets: ring, alpha: 0, scale: 1.15, duration: 400, ease: "Cubic.easeOut", onComplete: () => ring.destroy() });
-    findEnemiesInRange(player.x, player.y, range).forEach((e) => damageEnemy.call(this.scene, e, 11.0));
-    const hitEnemies = new Set(findEnemiesInRange(player.x, player.y, range));
-    findEnemiesInRange(player.x, player.y, 520, 5).filter((e) => !hitEnemies.has(e)).forEach((e, i) => {
+
+    findEnemiesInRange(player.x, player.y, 520, 5).forEach((e, i) => {
       this.scene.time.delayedCall(i * 70, () => {
         if (!e.active || !e.body) return;
         const g = this.scene.add.graphics().setDepth(48);
@@ -608,21 +671,74 @@ class ScytheWeapon extends AutoWeapon {
           g.clear();
           g.lineStyle(1.5, 0xeeffdd, 0.85); g.beginPath(); g.moveTo(player.x, player.y); g.lineTo(e.x, e.y); g.strokePath();
           if (e.active && e.body) { const a = Phaser.Math.Angle.Between(e.x, e.y, player.x, player.y); e.body.setVelocity(Math.cos(a) * 220, Math.sin(a) * 220); }
-          if (elapsed >= 550) { pull.destroy(); if (g.active) g.destroy(); if (e.active) { damageEnemy.call(this.scene, e, 9.0); } }
+          if (elapsed >= 550) { pull.destroy(); if (g.active) g.destroy(); }
         }});
       });
     });
   }
   spawnWhirlwind() {
-    const duration = 1800, radius = 120;
-    let elapsed = 0, angle = 0;
-    const timer = this.scene.time.addEvent({ delay: 80, loop: true, callback: () => {
-      elapsed += 80; angle += 0.45;
-      const wx = player.x + Math.cos(angle) * 60, wy = player.y + Math.sin(angle) * 60;
-      const blade = this.scene.add.arc(wx, wy, 38, -90, 90, false, 0x88ffcc, 0.18).setAngle(Phaser.Math.RadToDeg(angle)).setStrokeStyle(4, 0xccffee, 0.7).setDepth(30);
-      this.scene.tweens.add({ targets: blade, alpha: 0, scale: 1.2, duration: 160, onComplete: () => blade.destroy() });
-      findEnemiesInRange(wx, wy, radius * 0.55, 4).forEach((enemy) => damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level) * 0.35));
-      if (elapsed >= duration) timer.destroy();
+    const duration = 1800, hitCooldown = new Map();
+    const blade = this.scene.add.image(player.x, player.y, "death-scythe")
+      .setDisplaySize(150, 150).setDepth(30).setAlpha(0.88).setOrigin(0.17, 0.78);
+
+    const hitboxSpecs = [
+      { distance: 44, angleOffset: 0.00, radius: 16 },
+      { distance: 62, angleOffset: -0.06, radius: 22 },
+      { distance: 78, angleOffset: -0.20, radius: 24 },
+      { distance: 88, angleOffset: -0.46, radius: 17 },
+    ];
+    const hitboxes = hitboxSpecs.map((spec) => {
+      const hitbox = this.scene.add.circle(player.x, player.y, spec.radius, 0x88ffcc, 0).setDepth(29);
+      this.scene.physics.add.existing(hitbox);
+      hitbox.body.setAllowGravity(false);
+      hitbox.body.setImmovable(true);
+      hitbox.body.setCircle(spec.radius);
+      hitbox._scytheSpec = spec;
+      return hitbox;
+    });
+
+    const syncBlade = (angle) => {
+      blade.setPosition(player.x, player.y);
+      blade.setRotation(angle);
+      hitboxes.forEach((hitbox) => {
+        const spec = hitbox._scytheSpec;
+        const hitAngle = angle + spec.angleOffset;
+        hitbox.setPosition(
+          player.x + Math.cos(hitAngle) * spec.distance,
+          player.y + Math.sin(hitAngle) * spec.distance
+        );
+        hitbox.body.updateFromGameObject();
+      });
+    };
+
+    syncBlade(0);
+
+    const overlaps = hitboxes.map((hitbox) => this.scene.physics.add.overlap(hitbox, enemies, (_, enemy) => {
+      if (!enemy.active) return;
+      const now = this.scene.time.now;
+      if ((hitCooldown.get(enemy) || 0) + 220 > now) return;
+      hitCooldown.set(enemy, now);
+      damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level) * 0.35);
+    }));
+
+    const startTime = this.scene.time.now;
+    let angle = 0;
+    const timer = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
+      if (!blade.active || hitboxes.some((hitbox) => !hitbox.active)) {
+        timer.destroy();
+        overlaps.forEach((overlap) => overlap.destroy());
+        hitboxes.forEach((hitbox) => { if (hitbox.active) hitbox.destroy(); });
+        return;
+      }
+      const elapsed = this.scene.time.now - startTime;
+      angle += 0.12;
+      syncBlade(angle);
+      if (elapsed >= duration) {
+        timer.destroy();
+        overlaps.forEach((overlap) => overlap.destroy());
+        hitboxes.forEach((hitbox) => hitbox.destroy());
+        this.scene.tweens.add({ targets: blade, alpha: 0, scale: 1.2, duration: 160, onComplete: () => blade.destroy() });
+      }
     }});
   }
 }
