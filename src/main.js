@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 
 const MAX_ENEMIES = 350;
-const INITIAL_ENEMY_COUNT = 12;
+const INITIAL_ENEMY_COUNT = 30;
 const INITIAL_SPAWN_DELAY = 420;
 const MIN_SPAWN_DELAY = 130;
 const BASE_ENEMY_SPAWN_PER_WAVE = 0.35;
@@ -12,9 +12,16 @@ const ENEMY_HEALTH_GROWTH_MULTIPLIER = 1.15;
 const SPECIAL_ENEMY_START_SECONDS = 300;
 const SPECIAL_ENEMY_INITIAL_RATE = 0.15;
 const SPECIAL_ENEMY_RATE_PER_MINUTE = 0.02;
+const ELITE_ENEMY_START_SECONDS = 300;
+const ELITE_ENEMY_SPAWN_RATE = 0.009;
+const ELITE_ENEMY_STAT_MULTIPLIER = 3;
 const PLAYER_BASE_CRIT_CHANCE = 0.05;
 const PLAYER_CRIT_DAMAGE_MULTIPLIER = 5;
 const EXP_ORB_LIFETIME_MS = 60000;
+const EXP_ORB_DROP_RATE = 0.75;
+const ORANGE_EXP_BASE_RATE = 0.05;
+const ORANGE_EXP_RATE_PER_2_MINUTES = 0.01;
+const ORANGE_EXP_RATE_CAP = 0.25;
 const PATH_SELECT_LEVEL = 15; // 길 선택 레벨
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://aezpthrsvtatfonhtvlo.supabase.co";
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_E_uydK1TiiUidl2z507RCQ_wOJ-xy9C";
@@ -200,6 +207,8 @@ let devPendingLevelChoice = false;
 let selectedStartWeaponType = "machineGun";
 let passiveLevels = {};
 let timerText = null, devBtnEl = null, lastMoveAngle = 0;
+let activeSurvivalMs = 0, runStarted = false, isManualPaused = false, isPageHiddenPaused = false;
+let pauseBtnBg = null, pauseBtnText = null, pauseOverlay = null, pauseOverlayText = null;
 let bgChunks = new Map();
 let profilePanelEl = null, rankingPanelEl = null, nicknamePromptEl = null;
 let chatPanelEl = null, chatMessagesEl = null, chatInputEl = null, chatStatusEl = null, chatPollTimer = null;
@@ -809,7 +818,8 @@ function setInternalSurvivalTime(seconds) {
 
   const targetSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
   devTimeAdjustedThisRun = true;
-  gameStartTime = gameSceneRef.time.now - targetSeconds * 1000;
+  activeSurvivalMs = targetSeconds * 1000;
+  gameStartTime = gameSceneRef.time.now - activeSurvivalMs;
   elapsedSeconds = Math.floor(targetSeconds / 10) * 10;
   enemyMaxHp = getEnemyMaxHpAtTime(targetSeconds);
   enemySpawnBonus = 0;
@@ -823,14 +833,12 @@ function setInternalSurvivalTime(seconds) {
   }
   enemies?.getChildren().forEach((enemy) => {
     if (!enemy.active) return;
-    enemy.maxHp = getEnemyMaxHpForType(enemy.enemyType);
+    enemy.maxHp = getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp, enemy.isElite);
     enemy.hp = Math.min(enemy.hp || enemy.maxHp, enemy.maxHp);
   });
 
   if (timerText) {
-    const mm = String(Math.floor(targetSeconds / 60)).padStart(2, "0");
-    const ss = String(targetSeconds % 60).padStart(2, "0");
-    timerText.setText(`${mm}:${ss}`);
+    timerText.setText(formatTimerSeconds(targetSeconds));
   }
 
   console.log(`생존시간 변경: ${targetSeconds}초`);
@@ -845,7 +853,7 @@ function getExpRequirementForLevel(targetLevel) {
 }
 
 function getNextExpIncrease(currentRequirement) {
-  return Math.max(15, Math.floor(currentRequirement * 0.25 + 0.2));
+  return 13;
 }
 
 function getEnemySpawnGrowthRate(seconds) {
@@ -875,6 +883,47 @@ function getEnemyMaxHpAtTime(seconds) {
   return hp;
 }
 
+function getActiveSurvivalSeconds() {
+  return Math.max(0, Math.floor(activeSurvivalMs / 1000));
+}
+
+function formatTimerSeconds(seconds) {
+  const safeSeconds = Math.max(0, Math.floor(seconds || 0));
+  const mm = String(Math.floor(safeSeconds / 60)).padStart(2, "0");
+  const ss = String(safeSeconds % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+function setGameplayTimersPaused(paused) {
+  if (spawnTimer) spawnTimer.paused = paused;
+  if (enemyHealthTimer) enemyHealthTimer.paused = paused;
+  if (enemyHealthPercentTimer) enemyHealthPercentTimer.paused = paused;
+  if (enemySpawnGrowthTimer) enemySpawnGrowthTimer.paused = paused;
+}
+
+function shouldGameplayRun() {
+  return runStarted && !isDead && !isChoosingWeapon && !isManualPaused && !isPageHiddenPaused && !document.hidden;
+}
+
+function syncPageVisibilityPause(forceHidden = document.hidden) {
+  isPageHiddenPaused = Boolean(forceHidden);
+  if (!gameSceneRef || !runStarted || isDead || isManualPaused || isChoosingWeapon) return;
+
+  if (isPageHiddenPaused) {
+    resetJoystick();
+    player?.body?.setVelocity(0, 0);
+    gameSceneRef.physics.pause();
+    setGameplayTimersPaused(true);
+  } else {
+    gameSceneRef.physics.resume();
+    setGameplayTimersPaused(false);
+  }
+}
+
+document.addEventListener("visibilitychange", () => syncPageVisibilityPause(document.hidden), { passive: true });
+window.addEventListener("pagehide", () => syncPageVisibilityPause(true), { passive: true });
+window.addEventListener("pageshow", () => syncPageVisibilityPause(document.hidden), { passive: true });
+
 function setDevLevel(targetLevel, queueChoice = true) {
   const nextLevel = Math.max(1, Math.floor(Number(targetLevel) || 1));
   level = nextLevel;
@@ -896,6 +945,7 @@ function gainExp(amount = 1) {
       exp -= expToNextLevel;
       level++;
       expToNextLevel += getNextExpIncrease(expToNextLevel);
+      healOnLevelUp();
       showLevelUpText.call(gameSceneRef);
       if (level === PATH_SELECT_LEVEL && !pathManager.chosenPath) {
         pauseGameplay.call(gameSceneRef);
@@ -907,6 +957,11 @@ function gainExp(amount = 1) {
     }
   }
   updateExpHud();
+}
+
+function healOnLevelUp() {
+  playerHp = Math.min(playerMaxHp, playerHp + playerMaxHp * 0.2);
+  updateHealthBar();
 }
 
 function showQueuedDevLevelChoice() {
@@ -971,7 +1026,13 @@ function preload() {
   this.load.spritesheet("goblin_walk", "assets/고블린 걸음.png", {
     frameWidth: 150, frameHeight: 150
   });
+  this.load.spritesheet("goblin_die", "assets/고블린 죽음.png", {
+    frameWidth: 150, frameHeight: 150
+  });
   this.load.spritesheet("bat_move", "assets/박쥐 이동.png", {
+    frameWidth: 150, frameHeight: 150
+  });
+  this.load.spritesheet("bat_die", "assets/박쥐 죽음.png", {
     frameWidth: 150, frameHeight: 150
   });
   this.load.spritesheet("enemy_die", "assets/Skeleton_01_White_Die.png", {
@@ -1629,10 +1690,22 @@ function create() {
     repeat: -1
   });
   this.anims.create({
+    key: "goblin_die",
+    frames: this.anims.generateFrameNumbers("goblin_die", { start: 0, end: 3 }),
+    frameRate: 10,
+    repeat: 0
+  });
+  this.anims.create({
     key: "bat_move",
     frames: this.anims.generateFrameNumbers("bat_move", { start: 0, end: 7 }),
     frameRate: 12,
     repeat: -1
+  });
+  this.anims.create({
+    key: "bat_die",
+    frames: this.anims.generateFrameNumbers("bat_die", { start: 0, end: 3 }),
+    frameRate: 12,
+    repeat: 0
   });
   this.anims.create({
     key: "enemy_die",
@@ -1643,6 +1716,14 @@ function create() {
 
   playerHp = playerMaxHp;
   gameStartTime = this.time.now;
+  activeSurvivalMs = 0;
+  runStarted = false;
+  isManualPaused = false;
+  isPageHiddenPaused = document.hidden;
+  pauseBtnBg = null;
+  pauseBtnText = null;
+  pauseOverlay = null;
+  pauseOverlayText = null;
 
   enemies = this.physics.add.group();
   bullets = this.physics.add.group();
@@ -1660,8 +1741,9 @@ function create() {
   this.physics.add.overlap(bullets, enemies, handleBulletHit, null, this);
 
   this.physics.add.overlap(player, expOrbs, (player, orb) => {
+    const expValue = orb.expValue || 1;
     orb.destroy();
-    gainExp(1);
+    gainExp(expValue);
     return;
     if (exp >= expToNextLevel && !isChoosingWeapon) {
       if (devMode) return;
@@ -1697,6 +1779,7 @@ expInfoText = makeText(this, this.scale.width - 20, 20, "", { fontSize: "15px", 
   lastHudLevel = null; lastHudExp = null; lastHudExpToNext = null; lastLevelTextLevel = null; lastTimerSecond = -1;
   updateWeaponHud();
   updateExpHud();
+  createPauseButton(this);
 
   createJoystick.call(this);
   layoutHud(this);
@@ -1717,7 +1800,13 @@ expInfoText = makeText(this, this.scale.width - 20, 20, "", { fontSize: "15px", 
 
 function update(time, delta) {
   updateInfiniteBackground.call(this);
+  if (isManualPaused) return;
   if (isChoosingWeapon) return;
+
+  if (!shouldGameplayRun()) {
+    player?.body?.setVelocity(0, 0);
+    return;
+  }
 
   movePlayer();
 
@@ -1747,12 +1836,11 @@ function update(time, delta) {
   });
 
   if (!isDead) {
-    const elapsed = Math.floor((time - gameStartTime) / 1000);
+    activeSurvivalMs += Math.max(0, Math.min(delta, 250));
+    const elapsed = getActiveSurvivalSeconds();
     if (elapsed !== lastTimerSecond) {
       lastTimerSecond = elapsed;
-      const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
-      const ss = String(elapsed % 60).padStart(2, "0");
-      timerText.setText(`${mm}:${ss}`);
+      timerText.setText(formatTimerSeconds(elapsed));
     }
   }
 
@@ -2584,7 +2672,7 @@ function createJoystick() {
   joystick = { base, knob, pointerId: null, active: false, radius: 54, vector: new Phaser.Math.Vector2(0, 0) };
 
   this.input.on("pointerdown", (pointer) => {
-    if (isChoosingWeapon || joystick.active) return;
+    if (isChoosingWeapon || isManualPaused || joystick.active) return;
     const pos = getCanvasPointerPosition(pointer);
     joystick.pointerId = pointer.id;
     joystick.active = true;
@@ -2630,7 +2718,7 @@ function createDomJoystick() {
   };
 
   const shouldIgnoreTouch = (event) => {
-    if (isChoosingWeapon || isDead || joystick.active) return true;
+    if (isChoosingWeapon || isManualPaused || isDead || joystick.active) return true;
     const target = event.target;
     return Boolean(target?.closest?.("button,input,select,textarea,#abyss-chat-panel,#player-meta-buttons"));
   };
@@ -2715,6 +2803,7 @@ function updateJoystick(pointerX, pointerY) {
 }
 
 function resetJoystick() {
+  if (!joystick) return;
   joystick.active = false; joystick.pointerId = null; joystick.vector.set(0, 0);
   if (joystick.isDom) {
     joystick.base.style.display = "none";
@@ -2766,6 +2855,7 @@ function pullExpOrbs() {
   expOrbs.getChildren().forEach((orb) => {
     if (!orb.active) return;
     if (now - (orb.spawnedAt || now) >= EXP_ORB_LIFETIME_MS) {
+      if (orb.glowRing?.active) orb.glowRing.destroy();
       orb.destroy();
       return;
     }
@@ -2838,20 +2928,24 @@ function showLevelUpText() {
 
 function pauseGameplay() {
   isChoosingWeapon = true;
+  if (isManualPaused) {
+    isManualPaused = false;
+    hidePauseOverlay();
+  }
   if (joystick) resetJoystick();
   player.body.setVelocity(0, 0);
   this.physics.pause();
-  spawnTimer.paused = true;
-  enemyHealthTimer.paused = true; enemyHealthPercentTimer.paused = true;
-  enemySpawnGrowthTimer.paused = true;
+  setGameplayTimersPaused(true);
+  updatePauseButtonVisibility();
 }
 
 function resumeGameplay() {
   isChoosingWeapon = false;
-  this.physics.resume();
-  spawnTimer.paused = false;
-  enemyHealthTimer.paused = false; enemyHealthPercentTimer.paused = false;
-  enemySpawnGrowthTimer.paused = false;
+  if (!isPageHiddenPaused && !document.hidden && runStarted && !isDead) {
+    this.physics.resume();
+    setGameplayTimersPaused(false);
+  }
+  updatePauseButtonVisibility();
 }
 
 // ─── 무기 카드 ──────────────────────────────────────────
@@ -2947,6 +3041,74 @@ function updateExpHud() {
   lastHudExpToNext = expToNextLevel;
   expInfoText.setText(`Lv. ${level}\nEXP ${formatDamage(exp)}/${expToNextLevel}`);
 }
+
+function createPauseButton(scene) {
+  if (pauseBtnBg) return;
+
+  pauseBtnBg = scene.add.rectangle(0, 0, 84, 32, 0x07131e, 0.78)
+    .setStrokeStyle(1.5, UI.cyan, 0.72)
+    .setScrollFactor(0)
+    .setDepth(1400)
+    .setInteractive({ useHandCursor: true })
+    .setVisible(false);
+  pauseBtnText = makeText(scene, 0, 0, "PAUSE", {
+    fontSize: "12px", color: "#6ee7d2", fontStyle: "800",
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(1401).setInteractive({ useHandCursor: true }).setVisible(false);
+
+  const toggle = () => setManualPaused(scene, !isManualPaused);
+  pauseBtnBg.on("pointerdown", toggle);
+  pauseBtnText.on("pointerdown", toggle);
+}
+
+function updatePauseButtonVisibility() {
+  const visible = runStarted && !isDead && !isChoosingWeapon;
+  pauseBtnBg?.setVisible(visible);
+  pauseBtnText?.setVisible(visible);
+  if (pauseBtnText) pauseBtnText.setText(isManualPaused ? "RESUME" : "PAUSE");
+}
+
+function setManualPaused(scene, paused) {
+  if (!runStarted || isDead || isChoosingWeapon) return;
+  isManualPaused = paused;
+  resetJoystick();
+  player?.body?.setVelocity(0, 0);
+
+  if (paused) {
+    scene.physics.pause();
+    setGameplayTimersPaused(true);
+    showPauseOverlay(scene);
+  } else {
+    hidePauseOverlay();
+    if (!isPageHiddenPaused && !document.hidden) {
+      scene.physics.resume();
+      setGameplayTimersPaused(false);
+    }
+  }
+  updatePauseButtonVisibility();
+}
+
+function showPauseOverlay(scene) {
+  hidePauseOverlay();
+  const cx = scene.scale.width / 2;
+  const cy = scene.scale.height / 2;
+  pauseOverlay = scene.add.rectangle(0, 0, scene.scale.width, scene.scale.height, 0x000000, 0.38)
+    .setOrigin(0)
+    .setScrollFactor(0)
+    .setDepth(1300)
+    .setInteractive();
+  pauseOverlayText = makeText(scene, cx, cy, "PAUSED", {
+    fontSize: "42px", color: "#6ee7d2", fontStyle: "900",
+    shadow: { blur: 12, color: "#00ffd5", fill: true },
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(1301);
+}
+
+function hidePauseOverlay() {
+  pauseOverlay?.destroy();
+  pauseOverlayText?.destroy();
+  pauseOverlay = null;
+  pauseOverlayText = null;
+}
+
 function layoutHud(scene, width = scene.scale.width, height = scene.scale.height) {
   const padding = Math.max(14, Math.min(24, width * 0.035));
   const compact = width < 640;
@@ -2957,6 +3119,8 @@ function layoutHud(scene, width = scene.scale.width, height = scene.scale.height
   timerText.setPosition(width / 2, padding).setFontSize(compact ? "17px" : "22px");
   expInfoText.setPosition(width - padding, portrait ? padding + 26 : padding).setFontSize(compact ? "12px" : "15px");
   expInfoText.setWordWrapWidth(Math.floor(portrait ? safeWidth * 0.46 : safeWidth * 0.34));
+  pauseBtnBg?.setPosition(width / 2, padding + (compact ? 36 : 42)).setSize(compact ? 76 : 84, compact ? 28 : 32);
+  pauseBtnText?.setPosition(width / 2, padding + (compact ? 36 : 42)).setFontSize(compact ? "11px" : "12px");
 
   weaponText.setPosition(padding, portrait ? padding + 82 : (compact ? height - 76 : padding + 42)).setFontSize(compact ? "11px" : "15px");
   weaponText.setWordWrapWidth(portrait ? Math.floor(safeWidth * 0.92) : (compact ? Math.floor(safeWidth) : Math.floor(safeWidth * 0.58)));
@@ -2970,6 +3134,7 @@ function layoutHud(scene, width = scene.scale.width, height = scene.scale.height
   healthBarGreen.setPosition(healthX, healthY).setSize(healthBarWidth, compact ? 9 : 10);
   healthBarRed.setPosition(healthX, healthY).setSize(healthBarWidth, compact ? 9 : 10);
   updateHealthBar();
+  updatePauseButtonVisibility();
 }
 
 function updateCameraZoom(width, height = this.scale.height) {
@@ -3040,14 +3205,18 @@ function getWeaponDamage(type, level) {
 
 // ─── 적 스폰 ────────────────────────────────────────────
 const ENEMY_TYPES = {
-  normal: { id: "normal", name: "일반", texture: "enemy_walk", anim: "enemy_walk", hpMultiplier: 1, tint: null, displaySize: 64, speed: 95, fleeSpeed: 130, slowedSpeed: 45 },
-  goblin: { id: "goblin", name: "고블린", texture: "goblin_walk", anim: "goblin_walk", hpMultiplier: 2, tint: null, displaySize: 252, speed: 88, fleeSpeed: 120, slowedSpeed: 42 },
-  bat: { id: "bat", name: "박쥐", texture: "bat_move", anim: "bat_move", hpMultiplier: 1.1, tint: null, displaySize: 182, bodyScale: 0.93, speed: 118, fleeSpeed: 150, slowedSpeed: 55 },
+  normal: { id: "normal", name: "일반", texture: "enemy_walk", anim: "enemy_walk", deathAnim: "enemy_die", hpMultiplier: 1, tint: null, displaySize: 64, speed: 95, fleeSpeed: 130, slowedSpeed: 45 },
+  goblin: { id: "goblin", name: "고블린", texture: "goblin_walk", anim: "goblin_walk", deathAnim: "goblin_die", hpMultiplier: 2, tint: null, displaySize: 252, speed: 88, fleeSpeed: 120, slowedSpeed: 42 },
+  bat: { id: "bat", name: "박쥐", texture: "bat_move", anim: "bat_move", deathAnim: "bat_die", hpMultiplier: 1.1, tint: null, displaySize: 182, bodyScale: 0.93, speed: 118, fleeSpeed: 150, slowedSpeed: 55 },
 };
 
 function getCurrentSurvivalSeconds() {
-  if (!gameSceneRef || !gameStartTime) return 0;
-  return Math.max(0, Math.floor((gameSceneRef.time.now - gameStartTime) / 1000));
+  return getActiveSurvivalSeconds();
+}
+
+function getOrangeExpOrbRate(seconds = getCurrentSurvivalSeconds()) {
+  const growthSteps = Math.floor(seconds / 120);
+  return Math.min(ORANGE_EXP_RATE_CAP, ORANGE_EXP_BASE_RATE + growthSteps * ORANGE_EXP_RATE_PER_2_MINUTES);
 }
 
 function getSpecialEnemyRate(seconds = getCurrentSurvivalSeconds()) {
@@ -3062,9 +3231,25 @@ function chooseEnemyType(seconds = getCurrentSurvivalSeconds()) {
   return Math.random() < 0.5 ? ENEMY_TYPES.goblin : ENEMY_TYPES.bat;
 }
 
-function getEnemyMaxHpForType(enemyTypeId = "normal", baseHp = enemyMaxHp) {
+function shouldSpawnElite(seconds = getCurrentSurvivalSeconds()) {
+  return seconds >= ELITE_ENEMY_START_SECONDS && Math.random() < ELITE_ENEMY_SPAWN_RATE;
+}
+
+function chooseEliteEnemyType() {
+  return Phaser.Utils.Array.GetRandom(Object.values(ENEMY_TYPES));
+}
+
+function getEnemyMaxHpForType(enemyTypeId = "normal", baseHp = enemyMaxHp, isElite = false) {
   const type = ENEMY_TYPES[enemyTypeId] || ENEMY_TYPES.normal;
-  return Math.ceil(baseHp * type.hpMultiplier);
+  const eliteMultiplier = isElite ? ELITE_ENEMY_STAT_MULTIPLIER : 1;
+  return Math.ceil(baseHp * type.hpMultiplier * eliteMultiplier);
+}
+
+function restoreEnemyBaseTint(enemy) {
+  if (!enemy?.active) return;
+  if (enemy.isElite) enemy.setTint(0xff4444);
+  else if (enemy.baseTint) enemy.setTint(enemy.baseTint);
+  else enemy.clearTint();
 }
 
 function spawnEnemy() {
@@ -3073,28 +3258,35 @@ function spawnEnemy() {
   const distance = 1200;
   const x = player.x + Math.cos(angle) * distance;
   const y = player.y + Math.sin(angle) * distance;
-  const enemyType = chooseEnemyType();
+  const isElite = shouldSpawnElite();
+  const enemyType = isElite ? chooseEliteEnemyType() : chooseEnemyType();
   const enemy = this.physics.add.sprite(x, y, enemyType.texture);
   enemy.enemyType = enemyType.id;
   enemy.enemyName = enemyType.name;
+  enemy.deathAnim = enemyType.deathAnim;
+  enemy.isElite = isElite;
   enemy.hpMultiplier = enemyType.hpMultiplier;
-  enemy.moveSpeed = enemyType.speed;
-  enemy.fleeSpeed = enemyType.fleeSpeed;
-  enemy.slowedSpeed = enemyType.slowedSpeed;
+  enemy.moveSpeed = enemyType.speed * (isElite ? ELITE_ENEMY_STAT_MULTIPLIER : 1);
+  enemy.fleeSpeed = enemyType.fleeSpeed * (isElite ? ELITE_ENEMY_STAT_MULTIPLIER : 1);
+  enemy.slowedSpeed = enemyType.slowedSpeed * (isElite ? ELITE_ENEMY_STAT_MULTIPLIER : 1);
   enemy.baseTint = enemyType.tint;
-  enemy.setDisplaySize(enemyType.displaySize, enemyType.displaySize);
+  const displaySize = enemyType.displaySize * (isElite ? ELITE_ENEMY_STAT_MULTIPLIER : 1);
+  enemy.setDisplaySize(displaySize, displaySize);
   if (enemyType.bodyScale && enemy.body) {
-    const bodySize = enemyType.displaySize * enemyType.bodyScale;
+    const bodySize = displaySize * enemyType.bodyScale;
     enemy.body.setSize(bodySize, bodySize);
+  } else if (isElite && enemy.body) {
+    enemy.body.setSize(displaySize, displaySize);
   }
   if (enemyType.tint) enemy.setTint(enemyType.tint);
+  if (isElite) enemy.setTint(0xff4444);
   enemy.play(enemyType.anim);
 
   if (player.x < enemy.x) {
   enemy.setFlipX(true);  // 플레이어가 왼쪽에 있으면 뒤집기
 }
 
-  enemy.maxHp = getEnemyMaxHpForType(enemy.enemyType);
+  enemy.maxHp = getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp, enemy.isElite);
   enemy.hp = enemy.maxHp;
   enemy.burnUntil = 0; enemy.stunnedUntil = 0;
   enemies.add(enemy);
@@ -3113,8 +3305,8 @@ function increaseEnemyMaxHp() {
   enemyMaxHp += ENEMY_HEALTH_FLAT_INCREASE;
   enemies.getChildren().forEach((enemy) => {
     if (!enemy.active) return;
-    const previousEnemyMaxHp = enemy.maxHp || getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp - ENEMY_HEALTH_FLAT_INCREASE);
-    const nextEnemyMaxHp = getEnemyMaxHpForType(enemy.enemyType);
+    const previousEnemyMaxHp = enemy.maxHp || getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp - ENEMY_HEALTH_FLAT_INCREASE, enemy.isElite);
+    const nextEnemyMaxHp = getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp, enemy.isElite);
     enemy.maxHp = nextEnemyMaxHp;
     enemy.hp = Math.min(nextEnemyMaxHp, (enemy.hp || 0) + Math.max(1, nextEnemyMaxHp - previousEnemyMaxHp));
     showEnemyGrowthPulse.call(this, enemy.x, enemy.y);
@@ -3189,15 +3381,15 @@ if (enemy.hp <= 0) {
     enemy.body.moves = false;
 
     if (enemy.anims) {
-        enemy.play("enemy_die");
+        enemy.play(enemy.deathAnim || "enemy_die");
         enemy.once("animationcomplete", () => {
             showDeathBurst.call(this, enemy.x, enemy.y);
-            spawnExpOrb.call(this, enemy.x, enemy.y);
+            spawnExpOrb.call(this, enemy.x, enemy.y, enemy.isElite ? "red" : "normal");
             enemy.destroy();
         });
     } else {
         showDeathBurst.call(this, enemy.x, enemy.y);
-        spawnExpOrb.call(this, enemy.x, enemy.y);
+        spawnExpOrb.call(this, enemy.x, enemy.y, enemy.isElite ? "red" : "normal");
         enemy.destroy();
     }
     return;
@@ -3205,17 +3397,37 @@ if (enemy.hp <= 0) {
 
   // 피격 후 tint 복구
   this.time.delayedCall(120, () => {
-    if (enemy.active) enemy.clearTint();
+    restoreEnemyBaseTint(enemy);
   });
 }
 
-function spawnExpOrb(x, y) {
-  if (Math.random() >= 0.75) return;
-  const orb = this.add.circle(x, y, 7, 0x66ccff);
+function spawnExpOrb(x, y, dropType = "normal") {
+  const forcedRed = dropType === "red";
+  if (!forcedRed && Math.random() >= EXP_ORB_DROP_RATE) return;
+
+  const isOrange = !forcedRed && Math.random() < getOrangeExpOrbRate();
+  const expValue = forcedRed ? 50 : (isOrange ? 5 : 1);
+  const color = forcedRed ? 0xff3355 : (isOrange ? 0xff9d2e : 0x66ccff);
+  const radius = forcedRed ? 12 : (isOrange ? 9 : 7);
+  const orb = this.add.circle(x, y, radius, color);
+  orb.expValue = expValue;
+  orb.orbType = forcedRed ? "red" : (isOrange ? "orange" : "blue");
   orb.spawnedAt = this.time.now;
   this.physics.add.existing(orb);
+  if (orb.body) orb.body.setCircle(radius);
   expOrbs.add(orb);
+  const ring = this.add.circle(x, y, radius + 5, color, 0).setStrokeStyle(2, color, forcedRed ? 0.85 : 0.45).setDepth(18);
+  orb.glowRing = ring;
+  this.tweens.add({
+    targets: ring,
+    scale: forcedRed ? 1.8 : 1.35,
+    alpha: 0,
+    duration: forcedRed ? 720 : 420,
+    ease: "Sine.easeOut",
+    onComplete: () => { if (ring.active) ring.destroy(); },
+  });
   this.time.delayedCall(EXP_ORB_LIFETIME_MS, () => {
+    if (orb.glowRing?.active) orb.glowRing.destroy();
     if (orb.active) orb.destroy();
   });
 }
@@ -3523,11 +3735,15 @@ function updateHealthBar() {
 function killPlayer() {
   if (isDead) return;
   isDead = true;
+  runStarted = false;
+  isManualPaused = false;
+  hidePauseOverlay();
+  updatePauseButtonVisibility();
   this.physics.pause();
 
   const deathTexts = ["YOU DIED", "MISSION FAILED", "ERASED", "THE NIGHT CONSUMED YOU"];
   const chosen = Phaser.Utils.Array.GetRandom(deathTexts);
-  const surviveTime = Math.floor((this.time.now - gameStartTime) / 1000);
+  const surviveTime = getActiveSurvivalSeconds();
   const runResult = handleRunEnd(surviveTime);
 
   const overlay = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.75)
@@ -3555,6 +3771,8 @@ function killPlayer() {
     isDead = false; exp = 0; level = 1; expToNextLevel = 5;
     playerHp = 100; playerMaxHp = 100;
     enemyMaxHp = 3; enemySpawnBonus = 0; enemySpawnRemainder = 0;
+    activeSurvivalMs = 0; runStarted = false; isManualPaused = false;
+    hidePauseOverlay();
     devTimeAdjustedThisRun = false;
     passiveLevels = {};
     playerVelocity.x = 0; playerVelocity.y = 0;
@@ -3567,8 +3785,12 @@ function killPlayer() {
 // ─── 시작 화면 ───────────────────────────────────────────
 function showStartScreen() {
   this.physics.pause();
-  spawnTimer.paused = true; enemyHealthTimer.paused = true; enemyHealthPercentTimer.paused = true; enemySpawnGrowthTimer.paused = true;
+  setGameplayTimersPaused(true);
   isChoosingWeapon = true;
+  runStarted = false;
+  isManualPaused = false;
+  hidePauseOverlay();
+  updatePauseButtonVisibility();
   setPlayerMetaButtonsVisible(true);
   if (!WEAPON_TYPES.some((weapon) => weapon.id === selectedStartWeaponType)) selectedStartWeaponType = "machineGun";
 
@@ -3655,8 +3877,15 @@ function showStartScreen() {
     weaponManager.weapons = [];
     weaponManager.addOrUpgrade(selectedStartWeaponType);
     updateWeaponHud();
-    this.physics.resume(); spawnTimer.paused = false; enemyHealthTimer.paused = false; enemyHealthPercentTimer.paused = false; enemySpawnGrowthTimer.paused = false;
+    runStarted = true;
+    activeSurvivalMs = 0;
+    lastTimerSecond = -1;
+    timerText.setText("00:00");
+    this.physics.resume();
+    setGameplayTimersPaused(false);
     isChoosingWeapon = false; gameStartTime = this.time.now; devTimeAdjustedThisRun = false;
+    updatePauseButtonVisibility();
+    syncPageVisibilityPause();
   };
 
   btnBg.on("pointerdown", startGame); btnText.on("pointerdown", startGame);
@@ -3718,7 +3947,7 @@ function showDevPanel() {
   const fieldStyle = "background:#101827;border:1px solid #334;color:#fff;padding:5px 7px;border-radius:4px;font-size:12px;width:72px;font-family:monospace;";
   const buttonStyle = "background:transparent;border:1px solid #00ffd5;color:#00ffd5;padding:5px 9px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:12px;";
 
-  const secondsNow = gameSceneRef ? Math.max(0, Math.floor((gameSceneRef.time.now - gameStartTime) / 1000)) : 0;
+  const secondsNow = gameSceneRef ? getActiveSurvivalSeconds() : 0;
   const timeRow = document.createElement("div");
   timeRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;";
   const timeLabel = document.createElement("span");
