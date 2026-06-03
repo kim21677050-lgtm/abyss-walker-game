@@ -8,13 +8,15 @@ const BASE_ENEMY_SPAWN_PER_WAVE = 0.35;
 const ENEMY_HEALTH_FLAT_INTERVAL = 45000;
 const ENEMY_HEALTH_FLAT_INCREASE = 5;
 const ENEMY_HEALTH_GROWTH_INTERVAL = 120000;
-const ENEMY_HEALTH_GROWTH_MULTIPLIER = 1.15;
+const ENEMY_HEALTH_GROWTH_MULTIPLIER = 1.09;
+const BASE_ENEMY_MAX_HP = 5;
 const SPECIAL_ENEMY_START_SECONDS = 300;
 const SPECIAL_ENEMY_INITIAL_RATE = 0.15;
 const SPECIAL_ENEMY_RATE_PER_MINUTE = 0.02;
 const ELITE_ENEMY_START_SECONDS = 300;
 const ELITE_ENEMY_SPAWN_RATE = 0.009;
 const ELITE_ENEMY_STAT_MULTIPLIER = 3;
+const ELITE_ENEMY_SPEED_MULTIPLIER = 0.6;
 const PLAYER_BASE_CRIT_CHANCE = 0.05;
 const PLAYER_CRIT_DAMAGE_MULTIPLIER = 5;
 const EXP_ORB_LIFETIME_MS = 60000;
@@ -42,7 +44,7 @@ const WEAPON_TYPES = [
   { id: "lightning",    name: "낙뢰",      icon: "LT", color: 0x66ccff, desc: ["주변 번개","2타겟","연쇄 번개","스턴","주기 낙뢰"] },
   { id: "laser",        name: "레이저",    icon: "LZ", color: 0xff5533, desc: ["직선 레이저","길이 증가","2갈래","화상","회전 레이저"] },
   { id: "skull",        name: "해골",      icon: "SK", color: 0xcc99ff, desc: ["광역 스턴+독","독 지속 증가","반경 확대","스턴 시간 증가","중독 중첩"] },
-  { id: "lung",         name: "유지호의 폐",icon:"LG", color: 0xff8844, desc: ["3회 연속 폭발","폭발 범위 증가","5회 연속 폭발","폭발 피해 증가","화염 지속 피해"] },
+  { id: "lung",         name: "유지호의 폐",icon:"LG", color: 0xff8844, desc: ["화염구 소환체","화염구 +1","냉기 투사체 +1","냉기 투사체 +1","쿨타임 50% 감소"] },
   { id: "scythe",       name: "대낫",      icon: "SC", color: 0x88ffcc, desc: ["전방 휩쓸기","범위 확대","2회 연속 베기","관통 낫날","회오리 소환"] },
   { id: "blackHole",    name: "블랙홀",    icon: "BH", color: 0xaa44ff, desc: ["적 흡입 후 폭발","반경+피해 증가","2개 동시 소환","흡입 슬로우+폭발 스턴","미니 블랙홀 3개"] },
   { id: "chain",        name: "체인",      icon: "CH", color: 0x88bbff, desc: ["적 2마리 사슬 연결","연결 3마리","피해 공유","적 끌어당김","연결 5마리+사슬 폭발"] },
@@ -192,7 +194,7 @@ let levelText, expInfoText, weaponText, levelUpText = null;
 let weaponManager, pathManager;
 let spawnTimer, enemyHealthTimer, enemyHealthPercentTimer, enemySpawnGrowthTimer;
 let isChoosingWeapon = false;
-let enemyMaxHp = 3, enemySpawnBonus = 0;
+let enemyMaxHp = BASE_ENEMY_MAX_HP, enemySpawnBonus = 0;
 let elapsedSeconds = 0, enemySpawnRemainder = 0;
 let joystick = null;
 let playerHp = 100, playerMaxHp = 100;
@@ -208,7 +210,8 @@ let selectedStartWeaponType = "machineGun";
 let passiveLevels = {};
 let timerText = null, devBtnEl = null, lastMoveAngle = 0;
 let activeSurvivalMs = 0, runStarted = false, isManualPaused = false, isPageHiddenPaused = false;
-let pauseBtnBg = null, pauseBtnText = null, pauseOverlay = null, pauseOverlayText = null;
+let pauseBtnBg = null, pauseBtnText = null, pauseOverlay = null, pauseOverlayText = null, pauseSurrenderBg = null, pauseSurrenderText = null;
+let runEndedBySurrender = false;
 let bgChunks = new Map();
 let profilePanelEl = null, rankingPanelEl = null, nicknamePromptEl = null;
 let chatPanelEl = null, chatMessagesEl = null, chatInputEl = null, chatStatusEl = null, chatPollTimer = null;
@@ -846,13 +849,15 @@ function setInternalSurvivalTime(seconds) {
 
 function getExpRequirementForLevel(targetLevel) {
   let required = 5;
-  for (let i = 1; i < targetLevel; i++) {
-    required += getNextExpIncrease(required);
+  for (let nextLevel = 2; nextLevel <= targetLevel; nextLevel++) {
+    required += getNextExpIncrease(nextLevel);
   }
   return required;
 }
 
-function getNextExpIncrease(currentRequirement) {
+function getNextExpIncrease(nextLevel = level) {
+  if (nextLevel >= 50) return 400;
+  if (nextLevel >= 20) return 100;
   return 13;
 }
 
@@ -865,7 +870,7 @@ function getEnemySpawnDelay(seconds) {
 }
 
 function getEnemyMaxHpAtTime(seconds) {
-  let hp = 3;
+  let hp = BASE_ENEMY_MAX_HP;
   const flatIntervalSeconds = ENEMY_HEALTH_FLAT_INTERVAL / 1000;
   const percentIntervalSeconds = ENEMY_HEALTH_GROWTH_INTERVAL / 1000;
   let nextFlat = flatIntervalSeconds;
@@ -944,7 +949,7 @@ function gainExp(amount = 1) {
     while (exp >= expToNextLevel) {
       exp -= expToNextLevel;
       level++;
-      expToNextLevel += getNextExpIncrease(expToNextLevel);
+      expToNextLevel += getNextExpIncrease(level);
       healOnLevelUp();
       showLevelUpText.call(gameSceneRef);
       if (level === PATH_SELECT_LEVEL && !pathManager.chosenPath) {
@@ -1044,6 +1049,7 @@ class WeaponManager {
   constructor(scene) {
     this.scene = scene;
     this.weapons = [];
+    this.isMuBonusCasting = false;
     this.maxWeapons = 5;
     this.timeStopped = false;   // 영원불멸 중 무기 동작 여부
     this.globalCastCount = 0;   // 무량무예 카운터
@@ -1071,7 +1077,13 @@ class WeaponManager {
     this.globalCastCount++;
     if (this.globalCastCount % 10 === 0) {
       // 보너스 2회 추가 시전
-      weaponTick(); weaponTick();
+      this.isMuBonusCasting = true;
+      try {
+        weaponTick();
+        weaponTick();
+      } finally {
+        this.isMuBonusCasting = false;
+      }
     }
   }
 }
@@ -1299,25 +1311,161 @@ class SkullWeapon extends AutoWeapon {
 }
 
 class LungWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "lung", 4000); }
+  constructor(scene) {
+    super(scene, "lung", 1300);
+    this.familiar = null;
+    this.familiarGlow = null;
+    this.floatPhase = Phaser.Math.FloatBetween(0, Math.PI * 2);
+  }
   tick(time) {
-    if (!this.canFire(time)) return;
+    this.updateFamiliar(time);
+    const cooldown = this.level >= 5 ? this.cooldown * 0.5 : this.cooldown;
+    if (!this.canFire(time, cooldown)) return;
     this.lastFire = time;
-    const count = this.level >= 3 ? 5 : 3;
-    const radius = this.level >= 2 ? 130 : 95;
     const damage = getWeaponDamage(this.type, this.level);
-    for (let i = 0; i < count; i++) {
-      this.scene.time.delayedCall(i * 220, () => {
-        const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
-        const dist = Phaser.Math.FloatBetween(40, 160);
-        const ex = player.x + Math.cos(angle) * dist, ey = player.y + Math.sin(angle) * dist;
-        explode.call(this.scene, ex, ey, radius, damage * (this.level >= 4 ? 1.4 : 1.0));
-        if (this.level >= 5) findEnemiesInRange(ex, ey, radius).forEach((enemy) => { enemy.burnUntil = Math.max(enemy.burnUntil || 0, this.scene.time.now + 1500); });
-        const smoke = this.scene.add.circle(ex, ey, radius * 0.6, 0xff6622, 0.15).setDepth(38);
-        this.scene.tweens.add({ targets: smoke, alpha: 0, scale: 1.6, y: smoke.y - 30, duration: 500, onComplete: () => smoke.destroy() });
-      });
+
+    for (let i = 0; i < this.getFireballCount(); i++) {
+      this.scene.time.delayedCall(i * 140, () => this.launchLungProjectile("fire", damage, i));
     }
+    for (let i = 0; i < this.getFrostCount(); i++) {
+      this.scene.time.delayedCall(180 + i * 160, () => this.launchLungProjectile("frost", damage * 0.82, i));
+    }
+
+    this.pulseFamiliar();
     weaponManager.countCast(() => this.tick(time));
+  }
+
+  getFireballCount() { return this.level >= 2 ? 2 : 1; }
+  getFrostCount() { return this.level >= 4 ? 2 : this.level >= 3 ? 1 : 0; }
+
+  updateFamiliar(time) {
+    if (!player?.active) return;
+    if (!this.familiar || !this.familiar.active) this.createFamiliar();
+    const bob = Math.sin(time * 0.004 + this.floatPhase) * 8;
+    const sway = Math.cos(time * 0.0027 + this.floatPhase) * 10;
+    const x = player.x + sway;
+    const y = player.y - 78 + bob;
+    this.familiar.setPosition(x, y);
+    this.familiarGlow?.setPosition(x, y);
+    this.familiar.setRotation(Math.sin(time * 0.003) * 0.15);
+    this.familiarGlow?.setScale(1 + Math.sin(time * 0.006) * 0.08);
+  }
+
+  createFamiliar() {
+    this.familiarGlow = this.scene.add.circle(player.x, player.y - 78, 25, 0xff6633, 0.18)
+      .setDepth(66)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    this.familiar = this.scene.add.container(player.x, player.y - 78).setDepth(67);
+    const body = this.scene.add.circle(0, 0, 15, 0xff7a33, 0.95)
+      .setStrokeStyle(3, 0xffdd88, 0.9);
+    const core = this.scene.add.circle(2, -2, 7, 0xffffcc, 0.85)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const ember = this.scene.add.circle(-8, 7, 4, 0xff3300, 0.8);
+    this.familiar.add([body, core, ember]);
+  }
+
+  pulseFamiliar() {
+    if (!this.familiar?.active) return;
+    this.scene.tweens.add({
+      targets: this.familiar,
+      scaleX: 1.24,
+      scaleY: 1.24,
+      duration: 80,
+      yoyo: true,
+      ease: "Quad.easeOut",
+    });
+  }
+
+  getFamiliarPosition() {
+    if (this.familiar?.active) return { x: this.familiar.x, y: this.familiar.y };
+    return { x: player.x, y: player.y - 78 };
+  }
+
+  launchLungProjectile(kind, damage, index = 0) {
+    if (!player?.active || isDead) return;
+    const target = findNearestEnemy();
+    if (!target?.active) return;
+
+    const start = this.getFamiliarPosition();
+    const color = kind === "frost" ? 0x8eeeff : 0xff5a18;
+    const glowColor = kind === "frost" ? 0xd8ffff : 0xffdd55;
+    const radius = kind === "frost" ? 13 : 15;
+    const projectile = this.scene.add.circle(start.x, start.y, radius, color, 0.95)
+      .setDepth(65)
+      .setStrokeStyle(3, glowColor, 0.85);
+    const aura = this.scene.add.circle(start.x, start.y, radius * 1.8, glowColor, 0.16)
+      .setDepth(64)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    this.scene.physics.add.existing(projectile);
+    projectile.body.setAllowGravity(false);
+    projectile.body.setCircle(radius);
+    projectile.body.setVelocity(0, 0);
+
+    const speed = kind === "frost" ? 430 : 520;
+    const turnStrength = kind === "frost" ? 0.11 : 0.075;
+    const createdAt = this.scene.time.now;
+    const hitEnemies = new Set();
+    const overlap = this.scene.physics.add.overlap(projectile, enemies, (_, enemy) => {
+      if (!enemy.active || hitEnemies.has(enemy)) return;
+      hitEnemies.add(enemy);
+      if (kind === "frost") this.frostBurst(projectile.x, projectile.y, damage);
+      else this.fireBurst(enemy, projectile.x, projectile.y, damage);
+      cleanup();
+    });
+
+    const timer = this.scene.time.addEvent({ delay: 16, loop: true, callback: () => {
+      if (!projectile.active || !target.active || this.scene.time.now > createdAt + 2200) {
+        if (projectile.active && kind === "frost") this.frostBurst(projectile.x, projectile.y, damage * 0.65);
+        cleanup();
+        return;
+      }
+
+      const desired = Phaser.Math.Angle.Between(projectile.x, projectile.y, target.x, target.y);
+      const current = projectile.body.velocity.angle();
+      const angle = Phaser.Math.Angle.RotateTo(current, desired, turnStrength);
+      projectile.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+      projectile.setRotation(angle + index * 0.2);
+      aura.setPosition(projectile.x, projectile.y);
+      const trail = this.scene.add.circle(projectile.x, projectile.y, kind === "frost" ? 5 : 6, glowColor, kind === "frost" ? 0.28 : 0.35)
+        .setDepth(63)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      this.scene.tweens.add({ targets: trail, alpha: 0, scale: 0.25, duration: 220, onComplete: () => trail.destroy() });
+    }});
+
+    const cleanup = () => {
+      overlap.destroy();
+      timer.destroy();
+      if (projectile.active) projectile.destroy();
+      if (aura.active) aura.destroy();
+    };
+  }
+
+  fireBurst(enemy, x, y, damage) {
+    damageEnemy.call(this.scene, enemy, damage);
+    enemy.burnUntil = Math.max(enemy.burnUntil || 0, this.scene.time.now + 1300);
+    const burst = this.scene.add.circle(x, y, 48, 0xff6618, 0.2)
+      .setDepth(62)
+      .setStrokeStyle(3, 0xffdd55, 0.65);
+    this.scene.tweens.add({ targets: burst, alpha: 0, scale: 1.65, duration: 360, ease: "Cubic.easeOut", onComplete: () => burst.destroy() });
+  }
+
+  frostBurst(x, y, damage) {
+    const radius = 92;
+    findEnemiesInRange(x, y, radius).forEach((enemy) => {
+      if (!enemy.active) return;
+      damageEnemy.call(this.scene, enemy, damage);
+      enemy.slowed = true;
+      enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, this.scene.time.now + 520);
+      enemy.setTint(0x99ddff);
+    });
+    const ring = this.scene.add.circle(x, y, radius, 0x99eaff, 0.12)
+      .setDepth(62)
+      .setStrokeStyle(4, 0xd8ffff, 0.82)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const core = this.scene.add.circle(x, y, 24, 0xffffff, 0.38)
+      .setDepth(63)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    this.scene.tweens.add({ targets: [ring, core], alpha: 0, scale: 1.45, duration: 420, ease: "Cubic.easeOut", onComplete: () => { ring.destroy(); core.destroy(); } });
   }
 }
 
@@ -1334,7 +1482,7 @@ class ScytheWeapon extends AutoWeapon {
   swing(time) {
     const range = 250;
     const baseAngle = lastMoveAngle - Math.PI * 0.85;
-    const damage = 10.7;
+    const damage = getWeaponDamage(this.type, this.level);
     const hitCooldown = new Map();
     const scythe = this.scene.add.image(player.x, player.y, "death-scythe")
       .setDisplaySize(range * 1.65, range * 1.65)
@@ -1673,41 +1821,45 @@ function create() {
 
   initInfiniteBackground.call(this);
 
-  this.anims.create({ key: "walk", frames: [1,2,3,4,5,6].map(i=>({key:`player_${i}`})), frameRate: 10, repeat: -1 });
-  this.anims.create({ key: "idle", frames: [{ key: "player_1" }], frameRate: 1, repeat: -1 });
+  const createAnimIfMissing = (config) => {
+    if (!this.anims.exists(config.key)) this.anims.create(config);
+  };
+
+  createAnimIfMissing({ key: "walk", frames: [1,2,3,4,5,6].map(i=>({key:`player_${i}`})), frameRate: 10, repeat: -1 });
+  createAnimIfMissing({ key: "idle", frames: [{ key: "player_1" }], frameRate: 1, repeat: -1 });
   player.play("idle");
 
-  this.anims.create({
+  createAnimIfMissing({
     key: "enemy_walk",
     frames: this.anims.generateFrameNumbers("enemy_walk", { start: 0, end: 9 }),
     frameRate: 10,
     repeat: -1
   });
-  this.anims.create({
+  createAnimIfMissing({
     key: "goblin_walk",
     frames: this.anims.generateFrameNumbers("goblin_walk", { start: 0, end: 7 }),
     frameRate: 10,
     repeat: -1
   });
-  this.anims.create({
+  createAnimIfMissing({
     key: "goblin_die",
     frames: this.anims.generateFrameNumbers("goblin_die", { start: 0, end: 3 }),
     frameRate: 10,
     repeat: 0
   });
-  this.anims.create({
+  createAnimIfMissing({
     key: "bat_move",
     frames: this.anims.generateFrameNumbers("bat_move", { start: 0, end: 7 }),
     frameRate: 12,
     repeat: -1
   });
-  this.anims.create({
+  createAnimIfMissing({
     key: "bat_die",
     frames: this.anims.generateFrameNumbers("bat_die", { start: 0, end: 3 }),
     frameRate: 12,
     repeat: 0
   });
-  this.anims.create({
+  createAnimIfMissing({
     key: "enemy_die",
     frames: this.anims.generateFrameNumbers("enemy_die", { start: 0, end: 12 }),
     frameRate: 13,
@@ -1724,6 +1876,9 @@ function create() {
   pauseBtnText = null;
   pauseOverlay = null;
   pauseOverlayText = null;
+  pauseSurrenderBg = null;
+  pauseSurrenderText = null;
+  runEndedBySurrender = false;
 
   enemies = this.physics.add.group();
   bullets = this.physics.add.group();
@@ -1749,7 +1904,7 @@ function create() {
       if (devMode) return;
       level++;
       exp = 0;
-      expToNextLevel += getNextExpIncrease(expToNextLevel);
+      expToNextLevel += getNextExpIncrease(level);
       showLevelUpText.call(this);
 
       // 15레벨: 길 선택
@@ -3100,13 +3255,37 @@ function showPauseOverlay(scene) {
     fontSize: "42px", color: "#6ee7d2", fontStyle: "900",
     shadow: { blur: 12, color: "#00ffd5", fill: true },
   }).setOrigin(0.5).setScrollFactor(0).setDepth(1301);
+
+  pauseSurrenderBg = scene.add.rectangle(cx, cy + 78, 188, 46, 0xff3344, 0.16)
+    .setStrokeStyle(1.5, 0xff6677, 0.82)
+    .setScrollFactor(0)
+    .setDepth(1301)
+    .setInteractive({ useHandCursor: true });
+  pauseSurrenderText = makeText(scene, cx, cy + 78, "\uC911\uB3C4 \uD3EC\uAE30", {
+    fontSize: "18px", color: "#ff9aa6", fontStyle: "900",
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(1302).setInteractive({ useHandCursor: true });
+
+  const surrender = () => surrenderRun(scene);
+  pauseSurrenderBg.on("pointerdown", surrender);
+  pauseSurrenderText.on("pointerdown", surrender);
 }
 
 function hidePauseOverlay() {
   pauseOverlay?.destroy();
   pauseOverlayText?.destroy();
+  pauseSurrenderBg?.destroy();
+  pauseSurrenderText?.destroy();
   pauseOverlay = null;
   pauseOverlayText = null;
+  pauseSurrenderBg = null;
+  pauseSurrenderText = null;
+}
+
+function surrenderRun(scene) {
+  if (!scene || !runStarted || isDead) return;
+  runEndedBySurrender = true;
+  isManualPaused = false;
+  killPlayer.call(scene);
 }
 
 function layoutHud(scene, width = scene.scale.width, height = scene.scale.height) {
@@ -3121,6 +3300,10 @@ function layoutHud(scene, width = scene.scale.width, height = scene.scale.height
   expInfoText.setWordWrapWidth(Math.floor(portrait ? safeWidth * 0.46 : safeWidth * 0.34));
   pauseBtnBg?.setPosition(width / 2, padding + (compact ? 36 : 42)).setSize(compact ? 76 : 84, compact ? 28 : 32);
   pauseBtnText?.setPosition(width / 2, padding + (compact ? 36 : 42)).setFontSize(compact ? "11px" : "12px");
+  pauseOverlay?.setSize(width, height);
+  pauseOverlayText?.setPosition(width / 2, height / 2).setFontSize(compact ? "34px" : "42px");
+  pauseSurrenderBg?.setPosition(width / 2, height / 2 + (compact ? 68 : 78)).setSize(compact ? 168 : 188, compact ? 42 : 46);
+  pauseSurrenderText?.setPosition(width / 2, height / 2 + (compact ? 68 : 78)).setFontSize(compact ? "16px" : "18px");
 
   weaponText.setPosition(padding, portrait ? padding + 82 : (compact ? height - 76 : padding + 42)).setFontSize(compact ? "11px" : "15px");
   weaponText.setWordWrapWidth(portrait ? Math.floor(safeWidth * 0.92) : (compact ? Math.floor(safeWidth) : Math.floor(safeWidth * 0.58)));
@@ -3192,12 +3375,12 @@ function getWeaponDamage(type, level) {
   const damageTable = {
     machineGun: [0.7, 1.3, 1.9, 2.5, 3.4],
     magicMissile: [2.2, 3.7, 5.2, 7.6, 11.2],
-    lightning: [2.5, 4.3, 6.1, 8.2, 11.5],
+    lightning: [2.5, 5.3, 8.1, 10.9, 13.7],
     laser: [2.4, 4.2, 6.0, 8.1, 10.2],
     skull: [3.0, 5.4, 7.8, 10.5, 13.5],
     lung: [2.8, 4.9, 6.4, 9.4, 12.4],
-    scythe: [3.7, 7.6, 10.6, 14.2, 18.1],
-    blackHole: [3.2, 7.1, 10.1, 14.0, 18.2],
+    scythe: [2.775, 5.7, 7.95, 10.65, 13.575],
+    blackHole: [3.2, 5.9, 8.6, 11.3, 14.0],
     chain: [1.8, 3.3, 4.8, 6.0, 9.0],
   };
   return damageTable[type][Math.min(level, 5) - 1];
@@ -3205,10 +3388,20 @@ function getWeaponDamage(type, level) {
 
 // ─── 적 스폰 ────────────────────────────────────────────
 const ENEMY_TYPES = {
-  normal: { id: "normal", name: "일반", texture: "enemy_walk", anim: "enemy_walk", deathAnim: "enemy_die", hpMultiplier: 1, tint: null, displaySize: 64, speed: 95, fleeSpeed: 130, slowedSpeed: 45 },
-  goblin: { id: "goblin", name: "고블린", texture: "goblin_walk", anim: "goblin_walk", deathAnim: "goblin_die", hpMultiplier: 2, tint: null, displaySize: 252, speed: 88, fleeSpeed: 120, slowedSpeed: 42 },
-  bat: { id: "bat", name: "박쥐", texture: "bat_move", anim: "bat_move", deathAnim: "bat_die", hpMultiplier: 1.1, tint: null, displaySize: 182, bodyScale: 0.93, speed: 118, fleeSpeed: 150, slowedSpeed: 55 },
+  normal: { id: "normal", name: "일반", texture: "enemy_walk", anim: "enemy_walk", deathAnim: "enemy_die", hpMultiplier: 1, tint: null, displaySize: 64, bodyScale: 0.52, speed: 95, fleeSpeed: 130, slowedSpeed: 45 },
+  goblin: { id: "goblin", name: "고블린", texture: "goblin_walk", anim: "goblin_walk", deathAnim: "goblin_die", hpMultiplier: 2, tint: null, displaySize: 252, bodyScale: 0.34, speed: 88, fleeSpeed: 120, slowedSpeed: 42 },
+  bat: { id: "bat", name: "박쥐", texture: "bat_move", anim: "bat_move", deathAnim: "bat_die", hpMultiplier: 1.1, tint: null, displaySize: 182, bodyScale: 0.28, speed: 118, fleeSpeed: 150, slowedSpeed: 55 },
 };
+
+function configureEnemyBody(enemy, enemyType) {
+  if (!enemy?.body) return;
+  const eliteBodyScale = enemy.isElite ? 0.72 : 1;
+  const targetWorldWidth = enemy.displayWidth * (enemyType.bodyScale ?? 0.5) * eliteBodyScale;
+  const targetWorldHeight = enemy.displayHeight * (enemyType.bodyScale ?? 0.5) * eliteBodyScale;
+  const unscaledWidth = targetWorldWidth / Math.max(Math.abs(enemy.scaleX), 0.001);
+  const unscaledHeight = targetWorldHeight / Math.max(Math.abs(enemy.scaleY), 0.001);
+  enemy.body.setSize(unscaledWidth, unscaledHeight, true);
+}
 
 function getCurrentSurvivalSeconds() {
   return getActiveSurvivalSeconds();
@@ -3266,18 +3459,14 @@ function spawnEnemy() {
   enemy.deathAnim = enemyType.deathAnim;
   enemy.isElite = isElite;
   enemy.hpMultiplier = enemyType.hpMultiplier;
-  enemy.moveSpeed = enemyType.speed * (isElite ? ELITE_ENEMY_STAT_MULTIPLIER : 1);
-  enemy.fleeSpeed = enemyType.fleeSpeed * (isElite ? ELITE_ENEMY_STAT_MULTIPLIER : 1);
-  enemy.slowedSpeed = enemyType.slowedSpeed * (isElite ? ELITE_ENEMY_STAT_MULTIPLIER : 1);
+  const eliteSpeedMultiplier = isElite ? ELITE_ENEMY_STAT_MULTIPLIER * ELITE_ENEMY_SPEED_MULTIPLIER : 1;
+  enemy.moveSpeed = enemyType.speed * eliteSpeedMultiplier;
+  enemy.fleeSpeed = enemyType.fleeSpeed * eliteSpeedMultiplier;
+  enemy.slowedSpeed = enemyType.slowedSpeed * eliteSpeedMultiplier;
   enemy.baseTint = enemyType.tint;
   const displaySize = enemyType.displaySize * (isElite ? ELITE_ENEMY_STAT_MULTIPLIER : 1);
   enemy.setDisplaySize(displaySize, displaySize);
-  if (enemyType.bodyScale && enemy.body) {
-    const bodySize = displaySize * enemyType.bodyScale;
-    enemy.body.setSize(bodySize, bodySize);
-  } else if (isElite && enemy.body) {
-    enemy.body.setSize(displaySize, displaySize);
-  }
+  configureEnemyBody(enemy, enemyType);
   if (enemyType.tint) enemy.setTint(enemyType.tint);
   if (isElite) enemy.setTint(0xff4444);
   enemy.play(enemyType.anim);
@@ -3372,7 +3561,7 @@ function damageEnemy(enemy, amount = 1, options = {}) {
   showDamageNumber.call(this, enemy.x, enemy.y - (enemy.displayHeight || 64) * 0.42, finalDamage, isCrit);
 
   // 만상무예 카운트
-  if (options.countAttack !== false && pathManager) pathManager.countAttack();
+  if (options.countAttack !== false && pathManager && !weaponManager?.isMuBonusCasting) pathManager.countAttack();
 
   // 변경 후 — 깔끔하게 단일 처리
 if (enemy.hp <= 0) {
@@ -3742,7 +3931,7 @@ function killPlayer() {
   this.physics.pause();
 
   const deathTexts = ["YOU DIED", "MISSION FAILED", "ERASED", "THE NIGHT CONSUMED YOU"];
-  const chosen = Phaser.Utils.Array.GetRandom(deathTexts);
+  const chosen = runEndedBySurrender ? "\uC911\uB3C4 \uD3EC\uAE30" : Phaser.Utils.Array.GetRandom(deathTexts);
   const surviveTime = getActiveSurvivalSeconds();
   const runResult = handleRunEnd(surviveTime);
 
@@ -3770,9 +3959,10 @@ function killPlayer() {
   const doRestart = () => {
     isDead = false; exp = 0; level = 1; expToNextLevel = 5;
     playerHp = 100; playerMaxHp = 100;
-    enemyMaxHp = 3; enemySpawnBonus = 0; enemySpawnRemainder = 0;
+    enemyMaxHp = BASE_ENEMY_MAX_HP; enemySpawnBonus = 0; enemySpawnRemainder = 0;
     activeSurvivalMs = 0; runStarted = false; isManualPaused = false;
     hidePauseOverlay();
+    runEndedBySurrender = false;
     devTimeAdjustedThisRun = false;
     passiveLevels = {};
     playerVelocity.x = 0; playerVelocity.y = 0;
