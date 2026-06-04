@@ -17,6 +17,12 @@ const ELITE_ENEMY_START_SECONDS = 300;
 const ELITE_ENEMY_SPAWN_RATE = 0.009;
 const ELITE_ENEMY_STAT_MULTIPLIER = 3;
 const ELITE_ENEMY_SPEED_MULTIPLIER = 0.6;
+const BOSS_SPAWN_INTERVAL_SECONDS = 300;
+const BOSS_HP_MULTIPLIER = 35;
+const BOSS_SIZE_MULTIPLIER = 4.2;
+const BOSS_SPEED_MULTIPLIER = 0.65;
+const BOSS_RED_ORB_REWARD = 3;
+const WEAPON_MAX_LEVEL = 7;
 const PLAYER_BASE_CRIT_CHANCE = 0.05;
 const PLAYER_CRIT_DAMAGE_MULTIPLIER = 5;
 const EXP_ORB_LIFETIME_MS = 60000;
@@ -33,21 +39,51 @@ const CHAT_MAX_MESSAGES = 50;
 const CHAT_POLL_INTERVAL = 5000;
 const DEV_CHAT_COMMAND = "/개발자모드";
 const PROFILE_STORAGE_KEY = "abyssWalker.playerProfile";
+const TREASURE_ITEMS = [
+  { id: "bloodyBlade", name: "피 묻은 칼날", icon: "BB", color: 0xb83a2f, desc: "공격력 +20%", stats: { attack: 0.2 } },
+  { id: "berserkerHeart", name: "광전사의 심장", icon: "BH", color: 0xff3344, desc: "공격력 +35% / 최대 체력 -25%", stats: { attack: 0.35, maxHpPercent: -0.25 } },
+  { id: "obsidianShard", name: "흑요석 파편", icon: "OS", color: 0x6d5cff, desc: "치명타 확률 +12%", stats: { critChance: 0.12 } },
+  { id: "redCrystal", name: "붉은 수정", icon: "RC", color: 0xff5577, desc: "치명타 피해 +75%", stats: { critDamage: 0.75 } },
+  { id: "hourglass", name: "시간의 모래시계", icon: "HG", color: 0xf0c46a, desc: "모든 무기 쿨다운 -15%", stats: { cooldown: -0.15 } },
+  { id: "galeShoes", name: "질풍의 신발", icon: "GS", color: 0x66ccff, desc: "이동속도 +20%", stats: { moveSpeed: 0.2 } },
+  { id: "featherCharm", name: "깃털 부적", icon: "FC", color: 0xa8f0ff, desc: "이동속도 +10% / 쿨다운 -8%", stats: { moveSpeed: 0.1, cooldown: -0.08 } },
+  { id: "steelArmor", name: "강철 갑옷", icon: "SA", color: 0xb7c1cc, desc: "받는 피해 -18%", stats: { damageTaken: -0.18 } },
+  { id: "giantBlood", name: "거인의 피", icon: "GB", color: 0xd94a4a, desc: "최대 체력 +40", stats: { maxHpFlat: 40 } },
+  { id: "unyieldingWill", name: "불굴의 의지", icon: "UW", color: 0xffaa33, desc: "체력 30% 이하일 때 공격력 +25%", stats: { lowHpAttack: 0.25 } },
+  { id: "goldenSkull", name: "황금 해골", icon: "GK", color: 0xffd45a, desc: "경험치 획득량 +25%", stats: { expGain: 0.25 } },
+  { id: "magnetNecklace", name: "자석 목걸이", icon: "MN", color: 0x77ddff, desc: "획득 범위 +75%", stats: { pickupRange: 0.75 } },
+  { id: "sageScroll", name: "현자의 두루마리", icon: "SS", color: 0x99ffcc, desc: "레벨업 시 공격력 +1% / 최대 +20%", stats: { levelAttack: 0.01, levelAttackCap: 0.2 } },
+  { id: "piercingWarhead", name: "관통 탄두", icon: "PW", color: 0xffe066, desc: "모든 투사체 관통 +1", stats: { projectilePierce: 1 } },
+  { id: "giantDevice", name: "거대화 장치", icon: "GD", color: 0xbb88ff, desc: "공격 범위 +35% / 투사체 크기 +35%", stats: { attackRange: 0.35, projectileSize: 0.35 } },
+  { id: "lightningRod", name: "피뢰침", icon: "LR", color: 0x66ccff, desc: "상태이상 지속시간 +50%", stats: { statusDuration: 0.5 } },
+  { id: "beastFang", name: "맹수의 송곳니", icon: "BF", color: 0xff8844, desc: "체력 70% 이상인 적에게 추가 피해 +20%", stats: { healthyEnemyDamage: 0.2 } },
+  { id: "unstableCore", name: "불안정한 핵", icon: "UC", color: 0xff44aa, desc: "공격력 +45% / 받는 피해 +45%", stats: { attack: 0.45, damageTaken: 0.45 } },
+];
+
+const EVOLUTION_RECIPES = [
+  { id: "gatlingGun", weapon: "machineGun", item: "hourglass", name: "개틀링건", icon: "GG", color: 0xffee66, desc: "발사속도 100% 증가 / 피해량 25% 감소" },
+  { id: "doomGuidance", weapon: "machineGun", item: "unstableCore", name: "멸망유도장치", icon: "DG", color: 0xff44aa, desc: "2초마다 단일 폭발탄 / 피해량 10배" },
+  { id: "comet", weapon: "magicMissile", item: "giantDevice", name: "혜성", icon: "CM", color: 0xd6a6ff, desc: "미사일 수 감소 / 쿨타임 증가 / 공격력+폭발 범위 대폭 증가" },
+  { id: "eventHorizon", weapon: "blackHole", item: "giantDevice", name: "사건의 지평선", icon: "EH", color: 0xaa44ff, desc: "반경과 흡입력 2배 / 단일 초대형 블랙홀" },
+  { id: "absoluteBind", weapon: "chain", item: "lightningRod", name: "절대 속박", icon: "AB", color: 0x88bbff, desc: "연결 적을 거의 정지시키고 중심으로 끌어당김" },
+  { id: "reaper", weapon: "scythe", item: "beastFang", name: "사신", icon: "RP", color: 0x88ffcc, desc: "플레이어 주변 사신 3기가 자동 대낫 시전" },
+  { id: "lich", weapon: "skull", item: "redCrystal", name: "리치", icon: "LC", color: 0xcc99ff, desc: "무한 독 장판 / 처치 시 확률로 소환수 생성" },
+];
 const BEST_RECORD_STORAGE_KEY = "abyssWalker.bestRecord";
 
 // ═══════════════════════════════════════════════════════
 // 무기 정의
 // ═══════════════════════════════════════════════════════
 const WEAPON_TYPES = [
-  { id: "machineGun",   name: "기관총",    icon: "MG", color: 0xffff66, desc: ["빠른 자동 연사","2발 발사","유도탄 추가","폭발탄","드론 지원"] },
-  { id: "magicMissile", name: "매직미사일",icon: "MM", color: 0xbb88ff, desc: ["추적 미사일","2발 발사","관통 재추적","폭발","분열 미사일"] },
-  { id: "lightning",    name: "낙뢰",      icon: "LT", color: 0x66ccff, desc: ["주변 번개","2타겟","연쇄 번개","스턴","주기 낙뢰"] },
-  { id: "laser",        name: "레이저",    icon: "LZ", color: 0xff5533, desc: ["직선 레이저","길이 증가","2갈래","화상","회전 레이저"] },
-  { id: "skull",        name: "해골",      icon: "SK", color: 0xcc99ff, desc: ["광역 스턴+독","독 지속 증가","반경 확대","스턴 시간 증가","중독 중첩"] },
-  { id: "lung",         name: "유지호의 폐",icon:"LG", color: 0xff8844, desc: ["화염구 소환체","화염구 +1","냉기 투사체 +1","냉기 투사체 +1","쿨타임 50% 감소"] },
-  { id: "scythe",       name: "대낫",      icon: "SC", color: 0x88ffcc, desc: ["전방 휩쓸기","범위 확대","2회 연속 베기","관통 낫날","회오리 소환"] },
-  { id: "blackHole",    name: "블랙홀",    icon: "BH", color: 0xaa44ff, desc: ["적 흡입 후 폭발","반경+피해 증가","2개 동시 소환","흡입 슬로우+폭발 스턴","미니 블랙홀 3개"] },
-  { id: "chain",        name: "체인",      icon: "CH", color: 0x88bbff, desc: ["적 2마리 사슬 연결","연결 3마리","피해 공유","적 끌어당김","연결 5마리+사슬 폭발"] },
+  { id: "machineGun",   name: "기관총",    icon: "MG", color: 0xffff66, desc: ["빠른 자동 연사","2발 발사","유도탄 추가","폭발탄","드론 지원","적 2회 관통","발사수 +2"] },
+  { id: "magicMissile", name: "매직미사일",icon: "MM", color: 0xbb88ff, desc: ["추적 미사일","2발 발사","관통 재추적","폭발","분열 미사일","분열 +3, 피해 +50%","동시 3발, 쿨타임 반감"] },
+  { id: "lightning",    name: "낙뢰",      icon: "LT", color: 0x66ccff, desc: ["주변 번개","2타겟","연쇄 번개","스턴","주기 낙뢰","폭발 범위 3배","공격력 2배"] },
+  { id: "laser",        name: "레이저",    icon: "LZ", color: 0xff5533, desc: ["직선 레이저","길이 증가","2갈래","화상","발사 횟수 +2","공격력 +30%","최대 3회 반사"] },
+  { id: "skull",        name: "해골",      icon: "SK", color: 0xcc99ff, desc: ["광역 스턴+독","독 지속 증가","반경 확대","스턴 시간 증가","중독 중첩","범위 2배","사망 시 독 확산"] },
+  { id: "lung",         name: "유지호의 폐",icon:"LG", color: 0xff8844, desc: ["화염구 소환체","화염구 +1","냉기 투사체 +1","냉기 투사체 +1","쿨타임 50% 감소","공격력 +40%","폐 하나 추가"] },
+  { id: "scythe",       name: "대낫",      icon: "SC", color: 0x88ffcc, desc: ["전방 휩쓸기","범위 확대","2회 연속 베기","관통 낫날","회오리 소환","범위 2배, 피해 +50%","3회 연속 시전"] },
+  { id: "blackHole",    name: "블랙홀",    icon: "BH", color: 0xaa44ff, desc: ["적 흡입 후 폭발","반경+피해 증가","2개 동시 소환","흡입 슬로우+폭발 스턴","미니 블랙홀 3개","범위 +40%","소멸 시 0.5초 스턴"] },
+  { id: "chain",        name: "체인",      icon: "CH", color: 0x88bbff, desc: ["적 2마리 사슬 연결","연결 3마리","피해 공유","적 끌어당김","연결 5마리+사슬 폭발","공격력 +40%","전기 줄기 +1"] },
 ];
 
 const PASSIVE_TYPES = [
@@ -188,7 +224,7 @@ if (window.visualViewport) {
 setTimeout(syncGameViewport, 0);
 
 // ── 전역 변수 ──────────────────────────────────────────
-let player, cursors, enemies, bullets, expOrbs;
+let player, cursors, enemies, bullets, expOrbs, treasureChests;
 let exp = 0, level = 1, expToNextLevel = 5;
 let levelText, expInfoText, weaponText, levelUpText = null;
 let weaponManager, pathManager;
@@ -196,6 +232,7 @@ let spawnTimer, enemyHealthTimer, enemyHealthPercentTimer, enemySpawnGrowthTimer
 let isChoosingWeapon = false;
 let enemyMaxHp = BASE_ENEMY_MAX_HP, enemySpawnBonus = 0;
 let elapsedSeconds = 0, enemySpawnRemainder = 0;
+let nextBossSpawnSeconds = BOSS_SPAWN_INTERVAL_SECONDS;
 let joystick = null;
 let playerHp = 100, playerMaxHp = 100;
 let healthBarBg, healthBarGreen, healthBarRed;
@@ -208,9 +245,12 @@ let devTimeAdjustedThisRun = false;
 let devPendingLevelChoice = false;
 let selectedStartWeaponType = "machineGun";
 let passiveLevels = {};
+let itemStats = null, ownedItems = [];
+let isTreasurePending = false;
+let friendlySummons = [];
 let timerText = null, devBtnEl = null, lastMoveAngle = 0;
 let activeSurvivalMs = 0, runStarted = false, isManualPaused = false, isPageHiddenPaused = false;
-let pauseBtnBg = null, pauseBtnText = null, pauseOverlay = null, pauseOverlayText = null, pauseSurrenderBg = null, pauseSurrenderText = null;
+let pauseBtnBg = null, pauseBtnText = null, pauseOverlay = null, pauseOverlayText = null, pauseRecipeBg = null, pauseRecipeText = null, pauseSurrenderBg = null, pauseSurrenderText = null;
 let runEndedBySurrender = false;
 let bgChunks = new Map();
 let profilePanelEl = null, rankingPanelEl = null, nicknamePromptEl = null;
@@ -824,6 +864,7 @@ function setInternalSurvivalTime(seconds) {
   activeSurvivalMs = targetSeconds * 1000;
   gameStartTime = gameSceneRef.time.now - activeSurvivalMs;
   elapsedSeconds = Math.floor(targetSeconds / 10) * 10;
+  nextBossSpawnSeconds = Math.floor(targetSeconds / BOSS_SPAWN_INTERVAL_SECONDS + 1) * BOSS_SPAWN_INTERVAL_SECONDS;
   enemyMaxHp = getEnemyMaxHpAtTime(targetSeconds);
   enemySpawnBonus = 0;
   for (let t = 10; t <= elapsedSeconds; t += 10) {
@@ -836,7 +877,7 @@ function setInternalSurvivalTime(seconds) {
   }
   enemies?.getChildren().forEach((enemy) => {
     if (!enemy.active) return;
-    enemy.maxHp = getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp, enemy.isElite);
+    enemy.maxHp = enemy.isBoss ? getBossMaxHp(enemyMaxHp) : getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp, enemy.isElite);
     enemy.hp = Math.min(enemy.hp || enemy.maxHp, enemy.maxHp);
   });
 
@@ -856,9 +897,11 @@ function getExpRequirementForLevel(targetLevel) {
 }
 
 function getNextExpIncrease(nextLevel = level) {
-  if (nextLevel >= 50) return 400;
-  if (nextLevel >= 20) return 100;
-  return 13;
+  if (nextLevel >= 100) return 1500;
+  if (nextLevel >= 50) return 500;
+  if (nextLevel >= 20) return 300;
+  if (nextLevel <= 10) return 13;
+  return 50;
 }
 
 function getEnemySpawnGrowthRate(seconds) {
@@ -912,7 +955,7 @@ function shouldGameplayRun() {
 
 function syncPageVisibilityPause(forceHidden = document.hidden) {
   isPageHiddenPaused = Boolean(forceHidden);
-  if (!gameSceneRef || !runStarted || isDead || isManualPaused || isChoosingWeapon) return;
+  if (!gameSceneRef || !runStarted || isDead || isManualPaused || isChoosingWeapon || isTreasurePending) return;
 
   if (isPageHiddenPaused) {
     resetJoystick();
@@ -952,11 +995,6 @@ function gainExp(amount = 1) {
       expToNextLevel += getNextExpIncrease(level);
       healOnLevelUp();
       showLevelUpText.call(gameSceneRef);
-      if (level === PATH_SELECT_LEVEL && !pathManager.chosenPath) {
-        pauseGameplay.call(gameSceneRef);
-        showPathSelection.call(gameSceneRef);
-        break;
-      }
       showWeaponSelection.call(gameSceneRef);
       break;
     }
@@ -975,12 +1013,7 @@ function showQueuedDevLevelChoice() {
   devPendingLevelChoice = false;
 
   showLevelUpText.call(gameSceneRef);
-  if (level === PATH_SELECT_LEVEL && !pathManager.chosenPath) {
-    pauseGameplay.call(gameSceneRef);
-    showPathSelection.call(gameSceneRef);
-  } else {
-    showWeaponSelection.call(gameSceneRef);
-  }
+  showWeaponSelection.call(gameSceneRef);
 }
 
 window.setSurvivalTime = function(seconds) {
@@ -1093,9 +1126,20 @@ class AutoWeapon {
     this.scene = scene; this.type = type; this.level = 1;
     this.cooldown = cooldown; this.lastFire = 0;
     this.definition = WEAPON_TYPES.find((w) => w.id === type);
+    this.evolution = null;
+    this.evolutionDef = null;
   }
-  upgrade() { this.level = Math.min(this.level + 1, 5); }
-  canFire(time, cooldown = this.cooldown) { return time > this.lastFire + cooldown; }
+  upgrade() { this.level = Math.min(this.level + 1, WEAPON_MAX_LEVEL); }
+  evolve(evolutionId) {
+    const def = EVOLUTION_RECIPES.find((recipe) => recipe.id === evolutionId && recipe.weapon === this.type);
+    if (!def) return false;
+    this.evolution = evolutionId;
+    this.evolutionDef = def;
+    this.definition = { ...this.definition, name: def.name, icon: def.icon, color: def.color };
+    return true;
+  }
+  isEvolved(id = null) { return id ? this.evolution === id : Boolean(this.evolution); }
+  canFire(time, cooldown = this.cooldown) { return time > this.lastFire + cooldown * getWeaponCooldownMultiplier(); }
 
   // 무기 발사 후 무량무예 카운트
   notifyCast(time, delta) {
@@ -1107,18 +1151,39 @@ class AutoWeapon {
 class MachineGunWeapon extends AutoWeapon {
   constructor(scene) { super(scene, "machineGun", 180); this.shotCount = 0; this.lastDroneShot = 0; }
   tick(time) {
-    if (this.canFire(time)) {
+    if (this.isEvolved("doomGuidance")) {
+      if (!this.canFire(time, 2000 / getWeaponCooldownMultiplier())) return;
       this.lastFire = time;
-      const count = this.level >= 2 ? 2 : 1;
+      const target = findNearestEnemy();
+      if (!target) return;
+      const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+      const bullet = createTracerProjectile(this.scene, player.x, player.y, angle, 0xff44aa);
+      bullet.damage = getWeaponDamage(this.type, this.level) * 10;
+      bullet.pierce = 0;
+      bullet.explodeRadius = 280;
+      bullet.explodeDamage = getWeaponDamage(this.type, this.level) * 10;
+      bullet.trailColor = 0xff44aa;
+      showMuzzleFlash(this.scene, player.x, player.y, angle, 0xff99dd);
+      this.scene.physics.moveToObject(bullet, target, 520);
+      weaponManager.countCast(() => this.tick(time, 0));
+      return;
+    }
+
+    const fireCooldown = this.isEvolved("gatlingGun") ? this.cooldown * 0.5 : this.cooldown;
+    if (this.canFire(time, fireCooldown)) {
+      this.lastFire = time;
+      const count = (this.level >= 2 ? 2 : 1) + (this.level >= 7 ? 2 : 0);
       for (let i = 0; i < count; i++) {
         const target = findNearestEnemy();
         if (!target) return;
         const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
         const shotColor = this.level >= 3 && this.shotCount % 8 === 0 ? 0x99ff66 : 0xffff66;
-        const bullet = createTracerProjectile(this.scene, player.x + i * 10 - 5, player.y, angle, shotColor);
-        bullet.damage = getWeaponDamage(this.type, this.level);
+        const offset = (i - (count - 1) * 0.5) * 10;
+        const bullet = createTracerProjectile(this.scene, player.x + offset, player.y, angle, shotColor);
+        bullet.damage = getWeaponDamage(this.type, this.level) * (this.isEvolved("gatlingGun") ? 0.75 : 1);
+        bullet.pierce = this.level >= 6 ? 2 : 0;
         bullet.explodeRadius = this.level >= 4 ? 55 : 0;
-        bullet.explodeDamage = getWeaponDamage(this.type, this.level) * 0.6;
+        bullet.explodeDamage = getWeaponDamage(this.type, this.level) * 0.6 * (this.isEvolved("gatlingGun") ? 0.75 : 1);
         this.shotCount++;
         if (this.level >= 3 && this.shotCount % 8 === 0) { bullet.homing = true; bullet.target = target; bullet.speed = 650; }
         showMuzzleFlash(this.scene, player.x, player.y, angle, 0xffffaa);
@@ -1144,23 +1209,38 @@ class MachineGunWeapon extends AutoWeapon {
 class MagicMissileWeapon extends AutoWeapon {
   constructor(scene) { super(scene, "magicMissile", 760); }
   tick(time) {
-    if (!this.canFire(time)) return;
+    const cooldown = (this.level >= 7 ? this.cooldown * 0.5 : this.cooldown) * (this.isEvolved("comet") ? 2 : 1);
+    if (!this.canFire(time, cooldown)) return;
     this.lastFire = time;
-    const count = this.level >= 2 ? 2 : 1;
+    const baseCount = this.level >= 7 ? 3 : (this.level >= 2 ? 2 : 1);
+    const count = this.isEvolved("comet") ? Math.max(1, Math.ceil(baseCount * 0.5)) : baseCount;
+    const targets = findEnemiesInRange(player.x, player.y, 900, count);
+    const fallbackTarget = targets[0] || findNearestEnemy();
+    if (!fallbackTarget) return;
+    const baseAngle = Phaser.Math.Angle.Between(player.x, player.y, fallbackTarget.x, fallbackTarget.y);
     for (let i = 0; i < count; i++) {
-      const target = findNearestEnemy();
-      if (!target) return;
-      const bullet = createProjectile(this.scene, player.x, player.y, 0xbb88ff, 7);
-      const aura = this.scene.add.circle(player.x, player.y, 18, 0xbb88ff, 0.22).setDepth(32);
-      bullet.damage = getWeaponDamage(this.type, this.level);
+      const target = targets[i] || fallbackTarget;
+      const spread = count > 1 ? (i - (count - 1) * 0.5) * 0.32 : 0;
+      const launchAngle = targets[i]
+        ? Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y)
+        : baseAngle + spread;
+      const startX = player.x + Math.cos(launchAngle) * 18;
+      const startY = player.y + Math.sin(launchAngle) * 18;
+      const bullet = createProjectile(this.scene, startX, startY, 0xbb88ff, 7);
+      const aura = this.scene.add.circle(startX, startY, 18, 0xbb88ff, 0.22).setDepth(32);
+      const damageMultiplier = this.isEvolved("comet") ? 3.5 : 1;
+      bullet.damage = getWeaponDamage(this.type, this.level) * damageMultiplier;
       bullet.homing = true; bullet.target = target; bullet.speed = 480;
+      bullet.homingDelayUntil = this.scene.time.now + (this.level >= 7 ? 160 : 0);
       bullet.pierce = this.level >= 3 ? 1 : 0;
-      bullet.explodeRadius = this.level >= 4 ? 70 : 0;
-      bullet.explodeDamage = getWeaponDamage(this.type, this.level) * 0.5;
+      bullet.explodeRadius = (this.level >= 4 ? 70 : 0) * (this.isEvolved("comet") ? 3 : 1);
+      bullet.explodeDamage = getWeaponDamage(this.type, this.level) * 0.5 * damageMultiplier;
       bullet.splitOnHit = this.level >= 5;
+      bullet.splitCount = this.level >= 6 ? 6 : 3;
+      bullet.splitDamage = getWeaponDamage(this.type, this.level) * 0.45 * damageMultiplier;
       bullet.trailColor = 0xd6a6ff; bullet.trailSize = 8;
       this.scene.tweens.add({ targets: aura, alpha: 0, scale: 2.1, duration: 220, onComplete: () => aura.destroy() });
-      this.scene.physics.moveToObject(bullet, target, bullet.speed);
+      bullet.body.setVelocity(Math.cos(launchAngle) * bullet.speed, Math.sin(launchAngle) * bullet.speed);
     }
     weaponManager.countCast(() => this.tick(time));
   }
@@ -1171,6 +1251,7 @@ class LightningWeapon extends AutoWeapon {
   tick(time) {
     if (this.canFire(time)) {
       this.lastFire = time;
+      const strikeRadius = this.level >= 6 ? 195 : 65;
       const targets = findEnemiesInRange(player.x, player.y, 650, this.level >= 2 ? 2 : 1);
       targets.forEach((target) => this.strike(target, time));
       if (this.level >= 3 && targets[0]) {
@@ -1186,9 +1267,14 @@ class LightningWeapon extends AutoWeapon {
     }
   }
   strike(target, time, damage = getWeaponDamage("lightning", this.level)) {
+    const strikeRadius = this.level >= 6 ? 195 : 65;
     showLightningStrike(this.scene, target.x, target.y, this.level >= 5);
-    if (this.level >= 4) { target.stunnedUntil = time + 700; target.setTint(0x99ddff); }
-    damageEnemy.call(this.scene, target, damage);
+    if (this.level >= 4) { target.stunnedUntil = time + 700 * getStatusDurationMultiplier(); target.setTint(0x99ddff); }
+    if (this.level >= 6) {
+      explode.call(this.scene, target.x, target.y, strikeRadius, damage, { countAttack: false });
+    } else {
+      damageEnemy.call(this.scene, target, damage);
+    }
   }
 }
 
@@ -1249,49 +1335,71 @@ class LaserWeapon extends AutoWeapon {
     if (this.canFire(time)) {
       this.lastFire = time;
       if (this.level >= 2) {
-        const targets = findEnemiesInRange(player.x, player.y, 900, 2);
+        const desiredShots = this.level >= 5 ? 4 : 2;
+        const targets = findEnemiesInRange(player.x, player.y, 900, desiredShots);
         if (targets.length === 0) return;
-        targets.forEach((t) => this.fireLaser(Phaser.Math.Angle.Between(player.x, player.y, t.x, t.y), 780, this.level >= 4));
-        if (targets.length === 1) this.fireLaser(Phaser.Math.Angle.Between(player.x, player.y, targets[0].x, targets[0].y) + 0.12, 780, this.level >= 4);
+        targets.forEach((t) => this.fireLaserWithBounce(player.x, player.y, Phaser.Math.Angle.Between(player.x, player.y, t.x, t.y), 780, this.level >= 4));
+        const baseAngle = Phaser.Math.Angle.Between(player.x, player.y, targets[0].x, targets[0].y);
+        for (let i = targets.length; i < desiredShots; i++) {
+          const offset = (i - (desiredShots - 1) * 0.5) * 0.13;
+          this.fireLaserWithBounce(player.x, player.y, baseAngle + offset, 780, this.level >= 4);
+        }
       } else {
         const target = findNearestEnemy();
         if (!target) return;
-        this.fireLaser(Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y), 560, false);
+        this.fireLaserWithBounce(player.x, player.y, Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y), 560, false);
       }
       weaponManager.countCast(() => this.tick(time, delta));
     }
-    if (this.level >= 5 && time > this.lastSpin + 180) {
-      this.lastSpin = time;
-      this.spinAngle += delta * 0.006 + 0.22;
-      this.fireLaser(this.spinAngle, 700, true, getWeaponDamage(this.type, this.level) * 0.35);
-    }
   }
-  fireLaser(angle, length, burn = false, damage = getWeaponDamage("laser", this.level)) {
-    const endX = player.x + Math.cos(angle) * length, endY = player.y + Math.sin(angle) * length;
-    showLaserBeam(this.scene, player.x, player.y, endX, endY, burn);
+  fireLaserWithBounce(startX, startY, angle, length, burn = false, damage = getWeaponDamage("laser", this.level), bouncesLeft = this.level >= 7 ? 3 : 0, hitSet = new Set()) {
+    const firstHit = this.fireLaser(startX, startY, angle, length, burn, damage, hitSet);
+    if (bouncesLeft <= 0 || !firstHit?.active) return;
+    const next = findEnemiesInRange(firstHit.x, firstHit.y, 620, 8).find((enemy) => enemy.active && !hitSet.has(enemy));
+    if (!next) return;
+    const nextAngle = Phaser.Math.Angle.Between(firstHit.x, firstHit.y, next.x, next.y);
+    this.scene.time.delayedCall(70, () => this.fireLaserWithBounce(firstHit.x, firstHit.y, nextAngle, Math.max(360, length * 0.72), burn, damage * 0.72, bouncesLeft - 1, hitSet));
+  }
+  fireLaser(startX, startY, angle, length, burn = false, damage = getWeaponDamage("laser", this.level), hitSet = new Set()) {
+    const endX = startX + Math.cos(angle) * length, endY = startY + Math.sin(angle) * length;
+    showLaserBeam(this.scene, startX, startY, endX, endY, burn);
+    let closestHit = null;
+    let closestDist = Infinity;
     enemies.getChildren().forEach((enemy) => {
-      if (distanceToSegment(enemy.x, enemy.y, player.x, player.y, endX, endY) <= 28) {
-        if (burn) enemy.burnUntil = this.scene.time.now + 1200;
+      if (hitSet.has(enemy)) return;
+      if (distanceToSegment(enemy.x, enemy.y, startX, startY, endX, endY) <= 28) {
+        if (burn) enemy.burnUntil = this.scene.time.now + 1200 * getStatusDurationMultiplier();
         damageEnemy.call(this.scene, enemy, damage);
+        hitSet.add(enemy);
+        const dist = Phaser.Math.Distance.Between(startX, startY, enemy.x, enemy.y);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closestHit = enemy;
+        }
       }
     });
+    return closestHit;
   }
 }
 
 class SkullWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "skull", 5000); }
+  constructor(scene) { super(scene, "skull", 5000); this.lastLichTick = 0; this.lichAura = null; }
   tick(time) {
+    if (this.isEvolved("lich")) {
+      this.tickLich(time);
+      return;
+    }
     if (!this.canFire(time)) return;
     this.lastFire = time;
-    const radius = this.level >= 3 ? 280 : 200;
+    const radius = (this.level >= 3 ? 280 : 200) * (this.level >= 6 ? 2 : 1);
     const poisonDuration = this.level >= 2 ? 2500 : 1500;
     const stunDuration = this.level >= 4 ? 1000 : 500;
     this.showSkullEffect(radius);
     findEnemiesInRange(player.x, player.y, radius).forEach((enemy) => {
-      enemy.stunnedUntil = time + stunDuration;
+      enemy.stunnedUntil = time + stunDuration * getStatusDurationMultiplier();
       enemy.setTint(0xcc99ff);
       const stacks = this.level >= 5 ? 2 : 1;
-      enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, time + poisonDuration * stacks);
+      enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, time + poisonDuration * stacks * getStatusDurationMultiplier());
       enemy.poisonDamage = getWeaponDamage(this.type, this.level) * 0.3;
       enemy.nextPoisonTick = 0;
       damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, this.level));
@@ -1308,6 +1416,24 @@ class SkullWeapon extends AutoWeapon {
     }
     this.scene.tweens.add({ targets: [ring, fog], alpha: 0, scale: 1.15, duration: 700, ease: "Cubic.easeOut", onComplete: () => { ring.destroy(); fog.destroy(); } });
   }
+  tickLich(time) {
+    const radius = 260;
+    if (!this.lichAura?.active) {
+      this.lichAura = this.scene.add.circle(player.x, player.y, radius, 0x99ff66, 0.07)
+        .setStrokeStyle(3, 0xcc99ff, 0.45)
+        .setDepth(31);
+    }
+    this.lichAura.setPosition(player.x, player.y);
+    if (time < this.lastLichTick + 500) return;
+    this.lastLichTick = time;
+    findEnemiesInRange(player.x, player.y, radius).forEach((enemy) => {
+      enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, time + 1600 * getStatusDurationMultiplier());
+      enemy.poisonDamage = getWeaponDamage(this.type, 7) * 0.3;
+      enemy.nextPoisonTick = 0;
+      damageEnemy.call(this.scene, enemy, getWeaponDamage(this.type, 7) * 0.28);
+      enemy.setTint(0x99ff66);
+    });
+  }
 }
 
 class LungWeapon extends AutoWeapon {
@@ -1315,6 +1441,8 @@ class LungWeapon extends AutoWeapon {
     super(scene, "lung", 1300);
     this.familiar = null;
     this.familiarGlow = null;
+    this.familiar2 = null;
+    this.familiarGlow2 = null;
     this.floatPhase = Phaser.Math.FloatBetween(0, Math.PI * 2);
   }
   tick(time) {
@@ -1324,11 +1452,14 @@ class LungWeapon extends AutoWeapon {
     this.lastFire = time;
     const damage = getWeaponDamage(this.type, this.level);
 
-    for (let i = 0; i < this.getFireballCount(); i++) {
-      this.scene.time.delayedCall(i * 140, () => this.launchLungProjectile("fire", damage, i));
-    }
-    for (let i = 0; i < this.getFrostCount(); i++) {
-      this.scene.time.delayedCall(180 + i * 160, () => this.launchLungProjectile("frost", damage * 0.82, i));
+    const familiarCount = this.level >= 7 ? 2 : 1;
+    for (let f = 0; f < familiarCount; f++) {
+      for (let i = 0; i < this.getFireballCount(); i++) {
+        this.scene.time.delayedCall(f * 90 + i * 140, () => this.launchLungProjectile("fire", damage, i, f));
+      }
+      for (let i = 0; i < this.getFrostCount(); i++) {
+        this.scene.time.delayedCall(180 + f * 90 + i * 160, () => this.launchLungProjectile("frost", damage * 0.82, i, f));
+      }
     }
 
     this.pulseFamiliar();
@@ -1349,6 +1480,20 @@ class LungWeapon extends AutoWeapon {
     this.familiarGlow?.setPosition(x, y);
     this.familiar.setRotation(Math.sin(time * 0.003) * 0.15);
     this.familiarGlow?.setScale(1 + Math.sin(time * 0.006) * 0.08);
+    if (this.level >= 7) {
+      if (!this.familiar2 || !this.familiar2.active) this.createSecondFamiliar();
+      const x2 = player.x - sway;
+      const y2 = player.y - 78 - bob * 0.7;
+      this.familiar2.setPosition(x2, y2);
+      this.familiarGlow2?.setPosition(x2, y2);
+      this.familiar2.setRotation(-Math.sin(time * 0.003) * 0.15);
+      this.familiarGlow2?.setScale(1 + Math.cos(time * 0.006) * 0.08);
+    } else if (this.familiar2?.active) {
+      this.familiar2.destroy();
+      this.familiarGlow2?.destroy();
+      this.familiar2 = null;
+      this.familiarGlow2 = null;
+    }
   }
 
   createFamiliar() {
@@ -1364,10 +1509,25 @@ class LungWeapon extends AutoWeapon {
     this.familiar.add([body, core, ember]);
   }
 
+  createSecondFamiliar() {
+    this.familiarGlow2 = this.scene.add.circle(player.x, player.y - 78, 25, 0xff6633, 0.18)
+      .setDepth(66)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    this.familiar2 = this.scene.add.container(player.x, player.y - 78).setDepth(67);
+    const body = this.scene.add.circle(0, 0, 15, 0xff7a33, 0.95)
+      .setStrokeStyle(3, 0xffdd88, 0.9);
+    const core = this.scene.add.circle(-2, -2, 7, 0xffffcc, 0.85)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const ember = this.scene.add.circle(8, 7, 4, 0xff3300, 0.8);
+    this.familiar2.add([body, core, ember]);
+  }
+
   pulseFamiliar() {
     if (!this.familiar?.active) return;
+    const targets = [this.familiar];
+    if (this.familiar2?.active) targets.push(this.familiar2);
     this.scene.tweens.add({
-      targets: this.familiar,
+      targets,
       scaleX: 1.24,
       scaleY: 1.24,
       duration: 80,
@@ -1376,17 +1536,18 @@ class LungWeapon extends AutoWeapon {
     });
   }
 
-  getFamiliarPosition() {
+  getFamiliarPosition(index = 0) {
+    if (index % 2 === 1 && this.familiar2?.active) return { x: this.familiar2.x, y: this.familiar2.y };
     if (this.familiar?.active) return { x: this.familiar.x, y: this.familiar.y };
     return { x: player.x, y: player.y - 78 };
   }
 
-  launchLungProjectile(kind, damage, index = 0) {
+  launchLungProjectile(kind, damage, index = 0, familiarIndex = 0) {
     if (!player?.active || isDead) return;
     const target = findNearestEnemy();
     if (!target?.active) return;
 
-    const start = this.getFamiliarPosition();
+    const start = this.getFamiliarPosition(familiarIndex);
     const color = kind === "frost" ? 0x8eeeff : 0xff5a18;
     const glowColor = kind === "frost" ? 0xd8ffff : 0xffdd55;
     const radius = kind === "frost" ? 13 : 15;
@@ -1441,21 +1602,25 @@ class LungWeapon extends AutoWeapon {
   }
 
   fireBurst(enemy, x, y, damage) {
-    damageEnemy.call(this.scene, enemy, damage);
-    enemy.burnUntil = Math.max(enemy.burnUntil || 0, this.scene.time.now + 1300);
-    const burst = this.scene.add.circle(x, y, 48, 0xff6618, 0.2)
+    const radius = 96;
+    findEnemiesInRange(x, y, radius, 10).forEach((target) => {
+      if (!target.active) return;
+      damageEnemy.call(this.scene, target, target === enemy ? damage : damage * 0.72);
+      target.burnUntil = Math.max(target.burnUntil || 0, this.scene.time.now + 1600 * getStatusDurationMultiplier());
+    });
+    const burst = this.scene.add.circle(x, y, radius, 0xff6618, 0.2)
       .setDepth(62)
       .setStrokeStyle(3, 0xffdd55, 0.65);
     this.scene.tweens.add({ targets: burst, alpha: 0, scale: 1.65, duration: 360, ease: "Cubic.easeOut", onComplete: () => burst.destroy() });
   }
 
   frostBurst(x, y, damage) {
-    const radius = 92;
+    const radius = 138;
     findEnemiesInRange(x, y, radius).forEach((enemy) => {
       if (!enemy.active) return;
       damageEnemy.call(this.scene, enemy, damage);
       enemy.slowed = true;
-      enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, this.scene.time.now + 520);
+      enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, this.scene.time.now + 520 * getStatusDurationMultiplier());
       enemy.setTint(0x99ddff);
     });
     const ring = this.scene.add.circle(x, y, radius, 0x99eaff, 0.12)
@@ -1470,17 +1635,25 @@ class LungWeapon extends AutoWeapon {
 }
 
 class ScytheWeapon extends AutoWeapon {
-  constructor(scene) { super(scene, "scythe", 2000); this.swingAngle = 0; }
+  constructor(scene) { super(scene, "scythe", 2000); this.swingAngle = 0; this.reapers = []; }
   tick(time) {
+    if (this.isEvolved("reaper")) {
+      this.updateReapers(time);
+      if (!this.canFire(time, 1200)) return;
+      this.lastFire = time;
+      this.reapers.forEach((reaper, index) => this.reaperSwing(reaper.x, reaper.y, index));
+      return;
+    }
     if (!this.canFire(time)) return;
     this.lastFire = time;
-    const swings = this.level >= 3 ? 2 : 1;
+    const swings = this.level >= 7 ? 3 : this.level >= 3 ? 2 : 1;
     for (let i = 0; i < swings; i++) this.scene.time.delayedCall(i * 280, () => this.swing(time));
     if (this.level >= 5) this.scene.time.delayedCall(600, () => this.spawnWhirlwind());
     weaponManager.countCast(() => this.tick(time));
   }
   swing(time) {
-    const range = 250;
+    const rangeScale = this.level >= 6 ? 2 : 1;
+    const range = 250 * rangeScale;
     const baseAngle = lastMoveAngle - Math.PI * 0.85;
     const damage = getWeaponDamage(this.type, this.level);
     const hitCooldown = new Map();
@@ -1497,7 +1670,7 @@ class ScytheWeapon extends AutoWeapon {
       { distance: 188, angleOffset: -0.16, radius: 42 },
       { distance: 214, angleOffset: -0.34, radius: 34 },
       { distance: 224, angleOffset: -0.56, radius: 26 },
-    ];
+    ].map((spec) => ({ ...spec, distance: spec.distance * rangeScale, radius: spec.radius * rangeScale }));
     const hitboxes = hitboxSpecs.map((spec) => {
       const hitbox = this.scene.add.circle(player.x, player.y, spec.radius, 0x88ffcc, 0).setDepth(28);
       this.scene.physics.add.existing(hitbox);
@@ -1532,7 +1705,7 @@ class ScytheWeapon extends AutoWeapon {
       hitCooldown.set(enemy, now);
       damageEnemy.call(this.scene, enemy, damage);
       if (this.level >= 4 && enemy.active) {
-        enemy.burnUntil = Math.max(enemy.burnUntil || 0, now + 1200);
+        enemy.burnUntil = Math.max(enemy.burnUntil || 0, now + 1200 * getStatusDurationMultiplier());
       }
     }));
 
@@ -1558,6 +1731,47 @@ class ScytheWeapon extends AutoWeapon {
     const ring = this.scene.add.circle(player.x, player.y, range, 0xccffaa, 0).setStrokeStyle(3, 0xccffaa, 0.35).setDepth(27);
     this.scene.tweens.add({ targets: ring, alpha: 0, scale: 1.15, duration: 400, ease: "Cubic.easeOut", onComplete: () => ring.destroy() });
 
+  }
+  updateReapers(time) {
+    if (this.reapers.length < 3) {
+      this.reapers.forEach((r) => r.destroy());
+      this.reapers = [0, 1, 2].map(() => {
+        const c = this.scene.add.container(player.x, player.y).setDepth(34);
+        const glow = this.scene.add.circle(0, 0, 26, 0x88ffcc, 0.13).setBlendMode(Phaser.BlendModes.ADD);
+        const body = this.scene.add.circle(0, 0, 16, 0x111820, 0.95).setStrokeStyle(3, 0x88ffcc, 0.8);
+        const eye = this.scene.add.circle(4, -4, 3, 0xffffff, 0.9);
+        c.add([glow, body, eye]);
+        return c;
+      });
+    }
+    const positions = [
+      { x: 78, y: -72 },
+      { x: -78, y: -72 },
+      { x: 0, y: 92 },
+    ];
+    this.reapers.forEach((reaper, i) => {
+      const bob = Math.sin(time * 0.004 + i * 1.7) * 8;
+      reaper.setPosition(player.x + positions[i].x, player.y + positions[i].y + bob);
+    });
+  }
+  reaperSwing(x, y, index = 0) {
+    const radius = 185 * 0.75;
+    const damage = getWeaponDamage(this.type, this.level);
+    const blade = this.scene.add.image(x, y, "death-scythe")
+      .setDisplaySize(radius * 2.2, radius * 2.2)
+      .setDepth(35)
+      .setAlpha(0.95)
+      .setOrigin(0.17, 0.78)
+      .setRotation(index * 2.1 - Math.PI * 0.85);
+    this.scene.tweens.add({
+      targets: blade,
+      rotation: blade.rotation + Math.PI * 2,
+      alpha: 0,
+      duration: 360,
+      ease: "Cubic.easeOut",
+      onComplete: () => blade.destroy(),
+    });
+    findEnemiesInRange(x, y, radius, 10).forEach((enemy) => damageEnemy.call(this.scene, enemy, damage));
   }
   spawnWhirlwind() {
     const duration = 1800, hitCooldown = new Map();
@@ -1631,7 +1845,7 @@ class BlackHoleWeapon extends AutoWeapon {
   tick(time) {
     if (!this.canFire(time)) return;
     this.lastFire = time;
-    const count = this.level >= 3 ? 2 : 1;
+    const count = this.isEvolved("eventHorizon") ? 1 : (this.level >= 3 ? 2 : 1);
     for (let i = 0; i < count; i++) this.scene.time.delayedCall(i * 400, () => this.spawnBlackHole(time));
     weaponManager.countCast(() => this.tick(time));
   }
@@ -1639,7 +1853,10 @@ class BlackHoleWeapon extends AutoWeapon {
     const target = findNearestEnemy();
     const x = target ? target.x + Phaser.Math.FloatBetween(-60, 60) : player.x + Phaser.Math.FloatBetween(-200, 200);
     const y = target ? target.y + Phaser.Math.FloatBetween(-60, 60) : player.y + Phaser.Math.FloatBetween(-200, 200);
-    const pullRadius = this.level >= 2 ? 280 : 200, duration = 2000, damage = getWeaponDamage(this.type, this.level);
+    const basePullRadius = this.level >= 2 ? 280 : 200;
+    const pullRadius = basePullRadius * (this.level >= 6 ? 1.4 : 1) * (this.isEvolved("eventHorizon") ? 2 : 1);
+    const duration = 2000, damage = getWeaponDamage(this.type, this.level) * (this.isEvolved("eventHorizon") ? 1.5 : 1);
+    const pulledEnemies = new Set();
     const outerRing = this.scene.add.circle(x, y, pullRadius, 0x220033, 0).setStrokeStyle(2, 0xaa44ff, 0.35).setDepth(45);
     const core = this.scene.add.circle(x, y, 18, 0x000000, 1).setStrokeStyle(4, 0xcc66ff, 0.9).setDepth(47);
     const glow = this.scene.add.circle(x, y, 38, 0x6600cc, 0.22).setDepth(46);
@@ -1650,21 +1867,32 @@ class BlackHoleWeapon extends AutoWeapon {
         if (!enemy.active) return;
         const dist = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
         if (dist > pullRadius) return;
+        pulledEnemies.add(enemy);
         const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, x, y);
-        enemy.body.setVelocity(Math.cos(angle) * (this.level >= 4 ? 180 : 120), Math.sin(angle) * (this.level >= 4 ? 180 : 120));
-        if (this.level >= 4) enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, this.scene.time.now + 120);
+        const pullSpeed = (this.level >= 4 ? 180 : 120) * (this.isEvolved("eventHorizon") ? 2 : 1);
+        if (this.isEvolved("eventHorizon")) enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, this.scene.time.now + 120);
+        enemy.body.setVelocity(Math.cos(angle) * pullSpeed, Math.sin(angle) * pullSpeed);
+        if (this.level >= 4) enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, this.scene.time.now + 120 * getStatusDurationMultiplier());
       });
     }});
     this.scene.time.delayedCall(duration, () => {
       pullInterval.destroy();
-      explode.call(this.scene, x, y, this.level >= 2 ? 220 : 160, damage);
+      const explodeRadius = pullRadius;
+      explode.call(this.scene, x, y, explodeRadius, damage);
       if (this.level >= 4) {
-        findEnemiesInRange(x, y, 220).forEach((e) => {
-          e.stunnedUntil = this.scene.time.now + 800;
+        findEnemiesInRange(x, y, explodeRadius).forEach((e) => {
+          e.stunnedUntil = this.scene.time.now + 800 * getStatusDurationMultiplier();
           e.setTint(0x99ddff);
         });
       }
-      if (this.level >= 5) for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; this.scene.time.delayedCall(i * 180, () => this.spawnMiniBlackHole(x + Math.cos(a) * 120, y + Math.sin(a) * 120, damage * 0.45)); }
+      if (this.level >= 7) {
+        pulledEnemies.forEach((e) => {
+          if (!e.active) return;
+          e.stunnedUntil = Math.max(e.stunnedUntil || 0, this.scene.time.now + 500 * getStatusDurationMultiplier());
+          e.setTint(0x99ddff);
+        });
+      }
+      if (this.level >= 5 && !this.isEvolved("eventHorizon")) for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; this.scene.time.delayedCall(i * 180, () => this.spawnMiniBlackHole(x + Math.cos(a) * 120, y + Math.sin(a) * 120, damage * 0.45)); }
       outerRing.destroy(); core.destroy(); glow.destroy();
     });
     this.scene.tweens.add({ targets: glow, scale: { from: 1, to: 1.4 }, alpha: { from: 0.22, to: 0.1 }, duration: 500, yoyo: true, repeat: Math.floor(duration / 1000) });
@@ -1753,9 +1981,17 @@ class ChainWeapon extends AutoWeapon {
   tick(time) {
     if (!this.canFire(time)) return;
     this.lastFire = time;
-    this.clearChains();
+    const castCount = this.level >= 7 ? 2 : 1;
+    for (let i = 0; i < castCount; i++) this.performChainCast(i);
+    weaponManager.countCast(() => this.tick(time));
+  }
+  performChainCast(castIndex = 0) {
+    if (castIndex === 0) this.clearChains();
     const maxLinks = this.level >= 5 ? 5 : this.level >= 2 ? 3 : 2;
-    const targets = findEnemiesInRange(player.x, player.y, 700, maxLinks);
+    const candidates = findEnemiesInRange(player.x, player.y, 820, maxLinks * 2);
+    const offset = castIndex * maxLinks;
+    const targets = candidates.slice(offset, offset + maxLinks);
+    if (targets.length < 1 && castIndex > 0) return;
     if (targets.length < 1) return;
     const damage = getWeaponDamage(this.type, this.level), duration = 1800;
     const chainObjs = [], allTargets = [{ x: player.x, y: player.y }, ...targets];
@@ -1775,10 +2011,25 @@ class ChainWeapon extends AutoWeapon {
         const last = hitCooldown.get(enemy) || 0;
         if (this.scene.time.now > last + 300) {
           hitCooldown.set(enemy, this.scene.time.now);
-          damageEnemy.call(this.scene, enemy, damage * 0.35);
+          damageEnemy.call(this.scene, enemy, this.isEvolved("absoluteBind") ? damage * 0.15 : damage * 0.35);
           if (this.level >= 3) targets.forEach((other) => { if (other !== enemy && other.active) damageEnemy.call(this.scene, other, damage * 0.15); });
         }
       });
+      if (this.isEvolved("absoluteBind")) {
+        targets.forEach((enemy) => {
+          if (!enemy.active || !enemy.body) return;
+          enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, this.scene.time.now + 120);
+        });
+        if (targets.length >= 5) {
+          const cx = targets.reduce((sum, enemy) => sum + enemy.x, 0) / targets.length;
+          const cy = targets.reduce((sum, enemy) => sum + enemy.y, 0) / targets.length;
+          targets.forEach((enemy) => {
+            if (!enemy.active || !enemy.body) return;
+            const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, cx, cy);
+            enemy.body.setVelocity(Math.cos(angle) * 260, Math.sin(angle) * 260);
+          });
+        }
+      }
       if (this.level >= 4) targets.forEach((enemy) => {
         if (!enemy.active) return;
         const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
@@ -1790,7 +2041,6 @@ class ChainWeapon extends AutoWeapon {
         if (this.level >= 5) targets.forEach((enemy) => { if (enemy.active) explode.call(this.scene, enemy.x, enemy.y, 90, damage * 0.6); });
       }
     }});
-    weaponManager.countCast(() => this.tick(time));
   }
   drawChainLine(from, to) { const line = this.scene.add.graphics().setDepth(48); this.updateChainLine(line, from, to); return line; }
   updateChainLine(graphics, from, to) {
@@ -1879,12 +2129,17 @@ function create() {
   pauseSurrenderBg = null;
   pauseSurrenderText = null;
   runEndedBySurrender = false;
+  isTreasurePending = false;
+  itemStats = createEmptyItemStats();
+  ownedItems = [];
+  friendlySummons = [];
 
   enemies = this.physics.add.group();
   bullets = this.physics.add.group();
   expOrbs = this.physics.add.group();
+  treasureChests = this.physics.add.group();
   weaponManager = new WeaponManager(this);
-  pathManager = new PathManager(this);        // ← 길 매니저
+  pathManager = null;
 
   for (let i = 0; i < INITIAL_ENEMY_COUNT; i++) spawnEnemy.call(this);
 
@@ -1894,6 +2149,7 @@ function create() {
   enemySpawnGrowthTimer = this.time.addEvent({ delay: 10000, callback: () => increaseEnemySpawnAmount.call(this), loop: true });
 
   this.physics.add.overlap(bullets, enemies, handleBulletHit, null, this);
+  this.physics.add.overlap(player, treasureChests, (_, chest) => collectTreasureChest.call(this, chest), null, this);
 
   this.physics.add.overlap(player, expOrbs, (player, orb) => {
     const expValue = orb.expValue || 1;
@@ -1968,6 +2224,7 @@ function update(time, delta) {
   const enemyChildren = enemies.getChildren();
   enemyChildren.forEach((enemy) => {
     if (!enemy.active || !enemy.body) return;
+    if (enemy.bossAura?.active) enemy.bossAura.setPosition(enemy.x, enemy.y);
     if (enemy.frozen) return;
 
     if (enemy.fleeing) {
@@ -1990,20 +2247,21 @@ function update(time, delta) {
     enemy.setFlipX(player.x < enemy.x);
   });
 
-  if (!isDead) {
+  if (!isDead && !isTreasurePending) {
     activeSurvivalMs += Math.max(0, Math.min(delta, 250));
     const elapsed = getActiveSurvivalSeconds();
     if (elapsed !== lastTimerSecond) {
       lastTimerSecond = elapsed;
       timerText.setText(formatTimerSeconds(elapsed));
     }
+    checkBossSpawn.call(this, elapsed);
   }
 
   weaponManager.tick(time, delta);
-  pathManager.tick(time, delta);
   applyContactDamage.call(this, delta);
   updateHealthBar();
   updateProjectiles.call(this, time, delta);
+  updateFriendlySummons.call(this, time, delta);
   pullExpOrbs.call(this);
 
   if (level !== lastLevelTextLevel) {
@@ -2221,7 +2479,7 @@ if (this.timeStopActive && time > this.timeStopUntil) {
       const stacks = (this.gazeStacks.get(e) || 0) + 1;
       if (stacks >= 2) {
         // 스턴
-        e.stunnedUntil = time + 500;
+        e.stunnedUntil = time + 500 * getStatusDurationMultiplier();
         e.slowed = false;
         this.gazeStacks.set(e, 0);
         e.setTint(0xff6644);   // 스턴
@@ -2262,7 +2520,7 @@ e.setTint(0xff9966);   // 둔화
       if (diff < halfWidth + 0.22) {
         damageEnemy.call(this.scene, e, 22.0);
         pathManager.countAttack();
-        e.burnUntil = Math.max(e.burnUntil || 0, this.scene.time.now + 2000);
+        e.burnUntil = Math.max(e.burnUntil || 0, this.scene.time.now + 2000 * getStatusDurationMultiplier());
       }
     });
   }
@@ -2547,7 +2805,9 @@ function showWeaponSelection() {
     if (didSelect) return;
     didSelect = true;
 
-    if (option.isPathSkill) {
+    if (option.isEvolution) {
+      evolveWeapon(option.evolution);
+    } else if (option.isPathSkill) {
       pathManager.addSkill(option.skillId);
     } else if (option.isPassive) {
       addOrUpgradePassive(option.passive.id);
@@ -2568,14 +2828,16 @@ function showWeaponSelection() {
       : cy + 28;
 
     let card;
-    if (option.isPathSkill) {
+    if (option.isEvolution) {
+      card = createEvolutionCard.call(this, x, y, index + 1, option.evolution);
+    } else if (option.isPathSkill) {
       card = createPathSkillCard.call(this, x, y, index + 1, option.skill);
     } else if (option.isPassive) {
       const nextLevel = Math.min(getPassiveLevel(option.passive.id) + 1, 5);
       card = createPassiveCard.call(this, x, y, index + 1, option.passive, nextLevel);
     } else {
       const owned = weaponManager.getWeapon(option.weaponType.id);
-      const nextLevel = owned ? Math.min(owned.level + 1, 5) : 1;
+      const nextLevel = owned ? Math.min(owned.level + 1, WEAPON_MAX_LEVEL) : 1;
       card = createWeaponCard.call(this, x, y, index + 1, option.weaponType, nextLevel);
     }
     card.setScale(cardScale);
@@ -2587,7 +2849,7 @@ function showWeaponSelection() {
     hitZone.on("pointerup", () => selectOption(option));
     hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(3, 0xffffff, 0.95));
     hitZone.on("pointerout", () => {
-      const col = option.isPathSkill ? option.skill.color : option.isPassive ? option.passive.color : option.weaponType.color;
+      const col = option.isEvolution ? option.evolution.color : option.isPathSkill ? option.skill.color : option.isPassive ? option.passive.color : option.weaponType.color;
       card.getByName("bg").setStrokeStyle(2, col, 0.75);
     });
     overlay.add([card, hitZone]);
@@ -2631,15 +2893,90 @@ function createPathSkillCard(x, y, number, skill) {
   return card;
 }
 
+function hasTreasureItem(itemId) {
+  return ownedItems.includes(itemId);
+}
+
+function getAvailableEvolutionOptions() {
+  return EVOLUTION_RECIPES.filter((recipe) => {
+    const weapon = weaponManager.getWeapon(recipe.weapon);
+    return weapon && weapon.level >= WEAPON_MAX_LEVEL && !weapon.isEvolved() && hasTreasureItem(recipe.item);
+  });
+}
+
+function evolveWeapon(recipe) {
+  const weapon = weaponManager.getWeapon(recipe.weapon);
+  if (!weapon || weapon.level < WEAPON_MAX_LEVEL || weapon.isEvolved() || !hasTreasureItem(recipe.item)) return false;
+  weapon.evolve(recipe.id);
+  showEvolutionBurst.call(gameSceneRef || weapon.scene, recipe.name);
+  updateWeaponHud();
+  return true;
+}
+
+function devForceEvolution(recipe) {
+  if (!weaponManager) return false;
+  let weapon = weaponManager.getWeapon(recipe.weapon);
+  if (!weapon) {
+    weapon = createWeapon(gameSceneRef || weaponManager.scene, recipe.weapon);
+    weaponManager.weapons.push(weapon);
+  }
+  weapon.level = WEAPON_MAX_LEVEL;
+  if (!ownedItems.includes(recipe.item)) ownedItems.push(recipe.item);
+  if (!weapon.isEvolved()) weapon.evolve(recipe.id);
+  updateWeaponHud();
+  showEvolutionBurst.call(gameSceneRef || weapon.scene, recipe.name);
+  return true;
+}
+
+function devRemoveEvolution(recipe) {
+  const weapon = weaponManager?.getWeapon(recipe.weapon);
+  if (!weapon || weapon.evolution !== recipe.id) return false;
+  weapon.evolution = null;
+  weapon.evolutionDef = null;
+  weapon.definition = WEAPON_TYPES.find((w) => w.id === weapon.type);
+  weapon.level = WEAPON_MAX_LEVEL;
+  if (weapon.reapers) {
+    weapon.reapers.forEach((reaper) => reaper?.destroy());
+    weapon.reapers = [];
+  }
+  if (weapon.lichAura?.active) {
+    weapon.lichAura.destroy();
+    weapon.lichAura = null;
+  }
+  updateWeaponHud();
+  showDevNotice(`${recipe.name} 해제`, "#ffd56a");
+  return true;
+}
+
+function showEvolutionBurst(name) {
+  if (!this?.add) return;
+  const cx = this.scale.width / 2, cy = this.scale.height / 2;
+  const text = makeText(this, cx, cy - 64, "무기 진화", {
+    fontSize: "34px", color: "#ffd56a", fontStyle: "900",
+    shadow: { blur: 18, color: "#000000", fill: true },
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(4300);
+  const sub = makeText(this, cx, cy - 20, name, {
+    fontSize: "24px", color: "#ffffff", fontStyle: "900",
+    shadow: { blur: 14, color: "#aa44ff", fill: true },
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(4300);
+  this.tweens.add({ targets: [text, sub], alpha: 0, scale: 1.15, y: "-=38", duration: 1400, delay: 500, onComplete: () => { text.destroy(); sub.destroy(); } });
+}
+
 // 선택지 생성 (무기 + 길 스킬 혼합)
 function getRandomWeaponOptions() {
   const ownedWeapons = weaponManager.getOwnedWeaponTypes();
-  const maxedWeapons = weaponManager.weapons.filter((w) => w.level >= 5).map((w) => w.type);
+  const maxedWeapons = weaponManager.weapons.filter((w) => w.level >= WEAPON_MAX_LEVEL).map((w) => w.type);
 
   const weaponPool = ownedWeapons.length >= weaponManager.maxWeapons
     ? WEAPON_TYPES.filter((w) => ownedWeapons.includes(w.id) && !maxedWeapons.includes(w.id))
     : WEAPON_TYPES.filter((w) => !maxedWeapons.includes(w.id));
   const passivePool = PASSIVE_TYPES.filter((passive) => getPassiveLevel(passive.id) < 5);
+  const baseOptions = [
+    ...getAvailableEvolutionOptions().map((evolution) => ({ isEvolution: true, evolution })),
+    ...weaponPool.map((w) => ({ isPathSkill: false, weaponType: w })),
+    ...passivePool.map((passive) => ({ isPassive: true, passive })),
+  ];
+  return Phaser.Utils.Array.Shuffle(baseOptions).slice(0, 3);
 
   // 길 스킬 풀 계산
   let pathSkillOptions = [];
@@ -3096,7 +3433,8 @@ function pauseGameplay() {
 
 function resumeGameplay() {
   isChoosingWeapon = false;
-  if (!isPageHiddenPaused && !document.hidden && runStarted && !isDead) {
+  isTreasurePending = false;
+  if (!isPageHiddenPaused && !document.hidden && runStarted && !isDead && !isTreasurePending) {
     this.physics.resume();
     setGameplayTimersPaused(false);
   }
@@ -3139,6 +3477,38 @@ function createWeaponCard(x, y, number, weaponType, nextLevel) {
 }
 
 // ─── HUD ────────────────────────────────────────────────
+function createEvolutionCard(x, y, number, evolution) {
+  const card = this.add.container(x, y);
+  const material = TREASURE_ITEMS.find((item) => item.id === evolution.item);
+  const panel = createGlassPanel(this, 0, 0, 220, 276, evolution.color, 0.98);
+  const bg = panel.outer.setName("bg");
+  const badge = this.add.rectangle(-92, -120, 34, 28, 0x241a09, 0.95)
+    .setStrokeStyle(1, evolution.color, 0.65);
+  const key = makeText(this, -92, -120, `${number}`, {
+    fontSize: "15px", color: "#ffffff", fontStyle: "800", strokeThickness: 0,
+  }).setOrigin(0.5);
+  const iconPlate = this.add.circle(0, -67, 38, evolution.color, 0.16)
+    .setStrokeStyle(2, 0xffd56a, 0.55);
+  const icon = makeText(this, 0, -67, evolution.icon, {
+    fontSize: "31px", color: hexColor(evolution.color), fontStyle: "900",
+  }).setOrigin(0.5);
+  const name = makeText(this, 0, -18, evolution.name, {
+    fontSize: "21px", color: UI.text, fontStyle: "900",
+  }).setOrigin(0.5);
+  const typeLabel = makeText(this, 0, 22, "진화 무기", {
+    fontSize: "13px", color: "#ffd56a", fontStyle: "900", strokeThickness: 0,
+  }).setOrigin(0.5);
+  const matLabel = makeText(this, 0, 55, `재료: ${material?.name || evolution.item}`, {
+    fontSize: "12px", color: "#fff0a6", fontStyle: "800", strokeThickness: 0,
+  }).setOrigin(0.5);
+  const desc = makeText(this, 0, 98, evolution.desc, {
+    fontSize: "13px", color: "#f7e8bb", align: "center", wordWrap: { width: 170 },
+    strokeThickness: 0,
+  }).setOrigin(0.5);
+  card.add([bg, panel.inner, panel.line, badge, key, iconPlate, icon, name, typeLabel, matLabel, desc]);
+  return card;
+}
+
 function createPassiveCard(x, y, number, passive, nextLevel) {
   const card = this.add.container(x, y);
   const totalPercent = passive.perLevel * nextLevel;
@@ -3173,6 +3543,83 @@ function createPassiveCard(x, y, number, passive, nextLevel) {
   return card;
 }
 
+function showItemSelection() {
+  const options = getRandomTreasureItems(3);
+  const overlay = this.add.container(0, 0).setScrollFactor(0).setDepth(2400);
+  const W = this.scale.width, H = this.scale.height;
+  const cx = W / 2, cy = H / 2;
+  const shade = this.add.rectangle(0, 0, W, H, 0x02030a, 0.82).setOrigin(0);
+  const isPortrait = isPortraitMobile(W, H);
+  const isCompact = W < 760 || H < 620;
+  const cardBaseW = 220, cardBaseH = 276;
+  const gap = isPortrait ? 10 : (isCompact ? 8 : 18);
+  const cardScale = (isCompact || isPortrait)
+    ? Phaser.Math.Clamp(Math.min((W - 34) / cardBaseW, (H - (isPortrait ? 118 : 106)) / (cardBaseH * options.length + gap * (options.length - 1))), 0.56, isPortrait ? 0.8 : 0.86)
+    : Phaser.Math.Clamp((W - 72) / (cardBaseW * options.length + gap * (options.length - 1)), 0.76, 1);
+  const titleY = (isCompact || isPortrait) ? 28 : cy - 184;
+  const title = makeText(this, cx, titleY, "보물 선택", {
+    fontSize: `${isCompact ? 22 : 34}px`, color: "#ffd56a", fontStyle: "900",
+  }).setOrigin(0.5);
+  const subtitle = makeText(this, cx, titleY + (isCompact ? 28 : 36), "심연의 보물을 하나 고르세요", {
+    fontSize: `${isCompact ? 11 : 13}px`, color: "#f3d98b",
+  }).setOrigin(0.5);
+  overlay.add([shade, title, subtitle]);
+
+  let didSelect = false;
+  const selectItem = (item) => {
+    if (didSelect) return;
+    didSelect = true;
+    applyTreasureItem(item);
+    overlay.destroy(true);
+    resumeGameplay.call(this);
+  };
+
+  options.forEach((item, index) => {
+    const x = (isCompact || isPortrait)
+      ? cx
+      : cx + (index - (options.length - 1) / 2) * ((cardBaseW + gap) * cardScale);
+    const y = (isCompact || isPortrait)
+      ? (isPortrait ? 86 : 78) + (cardBaseH * cardScale) / 2 + index * ((cardBaseH + gap) * cardScale)
+      : cy + 28;
+    const card = createItemCard.call(this, x, y, index + 1, item).setScale(cardScale);
+    const hitZone = this.add.zone(x, y, cardBaseW * cardScale, cardBaseH * cardScale)
+      .setOrigin(0.5).setScrollFactor(0).setDepth(2401 + index)
+      .setInteractive({ useHandCursor: true });
+    hitZone.on("pointerup", () => selectItem(item));
+    hitZone.on("pointerover", () => card.getByName("bg").setStrokeStyle(3, 0xffffff, 0.95));
+    hitZone.on("pointerout", () => card.getByName("bg").setStrokeStyle(2, item.color, 0.75));
+    overlay.add([card, hitZone]);
+  });
+}
+
+function createItemCard(x, y, number, item) {
+  const card = this.add.container(x, y);
+  const panel = createGlassPanel(this, 0, 0, 220, 276, item.color, 0.96);
+  const bg = panel.outer.setName("bg");
+  const badge = this.add.rectangle(-92, -120, 34, 28, 0x1a2433, 0.95)
+    .setStrokeStyle(1, item.color, 0.55);
+  const key = makeText(this, -92, -120, `${number}`, {
+    fontSize: "15px", color: "#ffffff", fontStyle: "800", strokeThickness: 0,
+  }).setOrigin(0.5);
+  const iconPlate = this.add.circle(0, -67, 36, item.color, 0.12)
+    .setStrokeStyle(1, item.color, 0.45);
+  const icon = makeText(this, 0, -67, item.icon, {
+    fontSize: "31px", color: hexColor(item.color), fontStyle: "900",
+  }).setOrigin(0.5);
+  const name = makeText(this, 0, -18, item.name, {
+    fontSize: "20px", color: UI.text, fontStyle: "800",
+  }).setOrigin(0.5);
+  const typeLabel = makeText(this, 0, 22, "아이템", {
+    fontSize: "13px", color: "#ffd56a", fontStyle: "800", strokeThickness: 0,
+  }).setOrigin(0.5);
+  const desc = makeText(this, 0, 72, item.desc, {
+    fontSize: "14px", color: "#f7e8bb", align: "center", wordWrap: { width: 168 },
+    strokeThickness: 0,
+  }).setOrigin(0.5);
+  card.add([bg, panel.inner, panel.line, badge, key, iconPlate, icon, name, typeLabel, desc]);
+  return card;
+}
+
 function updateWeaponHud() {
   const weaponParts = weaponManager.weapons.map((w) => `${w.definition.name} Lv.${w.level}`);
   const passiveParts = PASSIVE_TYPES
@@ -3185,7 +3632,8 @@ function updateWeaponHud() {
     ? [`[${PATH_TYPES[pathManager.chosenPath].name}]`]
     : [];
 
-  weaponText.setText([...pathPart, ...weaponParts, ...passiveParts, ...skillParts].join(" / "));
+  const itemPart = ownedItems.length > 0 ? [`아이템 ${ownedItems.length}`] : [];
+  weaponText.setText([...pathPart, ...weaponParts, ...passiveParts, ...skillParts, ...itemPart].join(" / "));
   layoutHud(weaponText.scene);
 }
 
@@ -3255,13 +3703,25 @@ function showPauseOverlay(scene) {
     fontSize: "42px", color: "#6ee7d2", fontStyle: "900",
     shadow: { blur: 12, color: "#00ffd5", fill: true },
   }).setOrigin(0.5).setScrollFactor(0).setDepth(1301);
+  const recipeLines = EVOLUTION_RECIPES.map((recipe) => {
+    const weapon = WEAPON_TYPES.find((w) => w.id === recipe.weapon);
+    const item = TREASURE_ITEMS.find((it) => it.id === recipe.item);
+    return `${weapon?.name || recipe.weapon} + ${item?.name || recipe.item} = ${recipe.name}`;
+  });
+  pauseRecipeBg = scene.add.rectangle(cx, cy + 12, Math.min(scene.scale.width - 44, 620), 236, 0x07131e, 0.76)
+    .setStrokeStyle(1.5, 0xffd56a, 0.62)
+    .setScrollFactor(0)
+    .setDepth(1301);
+  pauseRecipeText = makeText(scene, cx, cy - 82, `진화 무기 조합법\n${recipeLines.join("\n")}`, {
+    fontSize: "14px", color: "#fff0a6", align: "center", fontStyle: "800",
+  }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1302);
 
-  pauseSurrenderBg = scene.add.rectangle(cx, cy + 78, 188, 46, 0xff3344, 0.16)
+  pauseSurrenderBg = scene.add.rectangle(cx, cy + 176, 188, 46, 0xff3344, 0.16)
     .setStrokeStyle(1.5, 0xff6677, 0.82)
     .setScrollFactor(0)
     .setDepth(1301)
     .setInteractive({ useHandCursor: true });
-  pauseSurrenderText = makeText(scene, cx, cy + 78, "\uC911\uB3C4 \uD3EC\uAE30", {
+  pauseSurrenderText = makeText(scene, cx, cy + 176, "\uC911\uB3C4 \uD3EC\uAE30", {
     fontSize: "18px", color: "#ff9aa6", fontStyle: "900",
   }).setOrigin(0.5).setScrollFactor(0).setDepth(1302).setInteractive({ useHandCursor: true });
 
@@ -3273,10 +3733,14 @@ function showPauseOverlay(scene) {
 function hidePauseOverlay() {
   pauseOverlay?.destroy();
   pauseOverlayText?.destroy();
+  pauseRecipeBg?.destroy();
+  pauseRecipeText?.destroy();
   pauseSurrenderBg?.destroy();
   pauseSurrenderText?.destroy();
   pauseOverlay = null;
   pauseOverlayText = null;
+  pauseRecipeBg = null;
+  pauseRecipeText = null;
   pauseSurrenderBg = null;
   pauseSurrenderText = null;
 }
@@ -3301,9 +3765,11 @@ function layoutHud(scene, width = scene.scale.width, height = scene.scale.height
   pauseBtnBg?.setPosition(width / 2, padding + (compact ? 36 : 42)).setSize(compact ? 76 : 84, compact ? 28 : 32);
   pauseBtnText?.setPosition(width / 2, padding + (compact ? 36 : 42)).setFontSize(compact ? "11px" : "12px");
   pauseOverlay?.setSize(width, height);
-  pauseOverlayText?.setPosition(width / 2, height / 2).setFontSize(compact ? "34px" : "42px");
-  pauseSurrenderBg?.setPosition(width / 2, height / 2 + (compact ? 68 : 78)).setSize(compact ? 168 : 188, compact ? 42 : 46);
-  pauseSurrenderText?.setPosition(width / 2, height / 2 + (compact ? 68 : 78)).setFontSize(compact ? "16px" : "18px");
+  pauseOverlayText?.setPosition(width / 2, height / 2 - (compact ? 154 : 176)).setFontSize(compact ? "30px" : "42px");
+  pauseRecipeBg?.setPosition(width / 2, height / 2 + (compact ? 4 : 12)).setSize(Math.min(width - 44, 620), compact ? 214 : 236);
+  pauseRecipeText?.setPosition(width / 2, height / 2 - (compact ? 94 : 82)).setFontSize(compact ? "11px" : "14px");
+  pauseSurrenderBg?.setPosition(width / 2, height / 2 + (compact ? 148 : 176)).setSize(compact ? 168 : 188, compact ? 42 : 46);
+  pauseSurrenderText?.setPosition(width / 2, height / 2 + (compact ? 148 : 176)).setFontSize(compact ? "16px" : "18px");
 
   weaponText.setPosition(padding, portrait ? padding + 82 : (compact ? height - 76 : padding + 42)).setFontSize(compact ? "11px" : "15px");
   weaponText.setWordWrapWidth(portrait ? Math.floor(safeWidth * 0.92) : (compact ? Math.floor(safeWidth) : Math.floor(safeWidth * 0.58)));
@@ -3336,24 +3802,87 @@ function getPassiveLevel(id) {
   return passiveLevels[id] || 0;
 }
 
+function createEmptyItemStats() {
+  return {
+    attack: 0,
+    critChance: 0,
+    critDamage: 0,
+    cooldown: 0,
+    moveSpeed: 0,
+    damageTaken: 0,
+    maxHpFlat: 0,
+    expGain: 0,
+    pickupRange: 0,
+    levelAttack: 0,
+    levelAttackCap: 0,
+    projectilePierce: 0,
+    attackRange: 0,
+    projectileSize: 0,
+    statusDuration: 0,
+    healthyEnemyDamage: 0,
+    lowHpAttack: 0,
+  };
+}
+
+function ensureItemStats() {
+  if (!itemStats) itemStats = createEmptyItemStats();
+  return itemStats;
+}
+
 function getPlayerAttackMultiplier() {
-  return 1 + getPassiveLevel("rage") * 0.1;
+  const stats = ensureItemStats();
+  const lowHpBonus = playerMaxHp > 0 && playerHp / playerMaxHp <= 0.3 ? stats.lowHpAttack : 0;
+  const sageBonus = Math.min(0.2, Math.max(0, level - 1) * (stats.levelAttack || 0));
+  return 1 + getPassiveLevel("rage") * 0.1 + stats.attack + lowHpBonus + sageBonus;
 }
 
 function getMoveSpeedMultiplier() {
-  return 1 + getPassiveLevel("agility") * 0.1;
+  return 1 + getPassiveLevel("agility") * 0.1 + ensureItemStats().moveSpeed;
 }
 
 function getPickupRangeMultiplier() {
-  return 1 + getPassiveLevel("pickpocket") * 0.15;
+  return 1 + getPassiveLevel("pickpocket") * 0.15 + ensureItemStats().pickupRange;
 }
 
 function getExpGainMultiplier() {
-  return 1 + getPassiveLevel("clarity") * 0.1;
+  return 1 + getPassiveLevel("clarity") * 0.1 + ensureItemStats().expGain;
 }
 
 function getPlayerCritChance() {
-  return PLAYER_BASE_CRIT_CHANCE;
+  return Math.min(0.95, PLAYER_BASE_CRIT_CHANCE + ensureItemStats().critChance);
+}
+
+function getPlayerCritDamageMultiplier() {
+  return PLAYER_CRIT_DAMAGE_MULTIPLIER + ensureItemStats().critDamage;
+}
+
+function getWeaponCooldownMultiplier() {
+  return Math.max(0.25, 1 + ensureItemStats().cooldown);
+}
+
+function getDamageTakenMultiplier() {
+  return Math.max(0.2, 1 + ensureItemStats().damageTaken);
+}
+
+function getAttackRangeMultiplier() {
+  return 1 + ensureItemStats().attackRange;
+}
+
+function getProjectileSizeMultiplier() {
+  return 1 + ensureItemStats().projectileSize;
+}
+
+function getProjectilePierceBonus() {
+  return ensureItemStats().projectilePierce || 0;
+}
+
+function getStatusDurationMultiplier() {
+  return 1 + ensureItemStats().statusDuration;
+}
+
+function getHealthyEnemyDamageMultiplier(enemy) {
+  if (!enemy?.maxHp || enemy.hp / enemy.maxHp < 0.7) return 1;
+  return 1 + ensureItemStats().healthyEnemyDamage;
 }
 
 function addOrUpgradePassive(id) {
@@ -3371,19 +3900,23 @@ function addOrUpgradePassive(id) {
   return true;
 }
 
+function hasWeaponLevel(type, minLevel) {
+  return (weaponManager?.getWeapon(type)?.level || 0) >= minLevel;
+}
+
 function getWeaponDamage(type, level) {
   const damageTable = {
-    machineGun: [0.7, 1.3, 1.9, 2.5, 3.4],
-    magicMissile: [2.2, 3.7, 5.2, 7.6, 11.2],
-    lightning: [2.5, 5.3, 8.1, 10.9, 13.7],
-    laser: [2.4, 4.2, 6.0, 8.1, 10.2],
-    skull: [3.0, 5.4, 7.8, 10.5, 13.5],
-    lung: [2.8, 4.9, 6.4, 9.4, 12.4],
-    scythe: [2.775, 5.7, 7.95, 10.65, 13.575],
-    blackHole: [3.2, 5.9, 8.6, 11.3, 14.0],
-    chain: [1.8, 3.3, 4.8, 6.0, 9.0],
+    machineGun: [0.7, 1.6, 2.5, 3.4, 4.75, 5.35, 5.95],
+    magicMissile: [2.2, 4.45, 6.7, 10.3, 15.7, 24.1, 26.2],
+    lightning: [2.5, 6.7, 10.9, 15.1, 19.3, 22.0, 45.25],
+    laser: [2.4, 5.1, 7.8, 10.95, 14.1, 18.69, 21.0],
+    skull: [3.0, 6.6, 10.2, 14.25, 18.75, 21.0, 23.25],
+    lung: [2.8, 5.95, 8.2, 12.7, 17.2, 24.64, 26.5],
+    scythe: [2.775, 7.162, 10.538, 14.588, 18.975, 29.152, 31.313],
+    blackHole: [3.2, 7.25, 11.3, 15.35, 19.4, 22.1, 24.2],
+    chain: [1.8, 4.05, 6.3, 8.1, 12.6, 18.0, 19.8],
   };
-  return damageTable[type][Math.min(level, 5) - 1];
+  return damageTable[type][Math.min(level, WEAPON_MAX_LEVEL) - 1];
 }
 
 // ─── 적 스폰 ────────────────────────────────────────────
@@ -3438,14 +3971,20 @@ function getEnemyMaxHpForType(enemyTypeId = "normal", baseHp = enemyMaxHp, isEli
   return Math.ceil(baseHp * type.hpMultiplier * eliteMultiplier);
 }
 
+function getBossMaxHp(baseHp = enemyMaxHp) {
+  return Math.ceil(baseHp * BOSS_HP_MULTIPLIER);
+}
+
 function restoreEnemyBaseTint(enemy) {
   if (!enemy?.active) return;
-  if (enemy.isElite) enemy.setTint(0xff4444);
+  if (enemy.isBoss) enemy.setTint(0x7d3cff);
+  else if (enemy.isElite) enemy.setTint(0xff4444);
   else if (enemy.baseTint) enemy.setTint(enemy.baseTint);
   else enemy.clearTint();
 }
 
 function spawnEnemy() {
+  if (isTreasurePending || isChoosingWeapon) return;
   if (enemies.getLength() >= MAX_ENEMIES) return;
   const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
   const distance = 1200;
@@ -3481,6 +4020,73 @@ function spawnEnemy() {
   enemies.add(enemy);
 }
 
+function spawnBoss(seconds = getCurrentSurvivalSeconds()) {
+  if (!player || !enemies) return;
+  if (enemies.getLength() >= MAX_ENEMIES) {
+    const replaceTarget = enemies.getChildren().find((enemy) => enemy?.active && !enemy.isBoss);
+    if (replaceTarget) {
+      replaceTarget.bossAura?.destroy();
+      enemies.remove(replaceTarget);
+      replaceTarget.destroy();
+    }
+  }
+  if (enemies.getLength() >= MAX_ENEMIES) return;
+
+  const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+  const distance = 1500;
+  const x = player.x + Math.cos(angle) * distance;
+  const y = player.y + Math.sin(angle) * distance;
+  const enemyType = ENEMY_TYPES.normal;
+  const boss = this.physics.add.sprite(x, y, enemyType.texture);
+  const bossSize = enemyType.displaySize * BOSS_SIZE_MULTIPLIER;
+
+  boss.enemyType = enemyType.id;
+  boss.enemyName = "BOSS";
+  boss.deathAnim = enemyType.deathAnim;
+  boss.isBoss = true;
+  boss.isElite = false;
+  boss.hpMultiplier = BOSS_HP_MULTIPLIER;
+  boss.moveSpeed = enemyType.speed * BOSS_SPEED_MULTIPLIER;
+  boss.fleeSpeed = enemyType.fleeSpeed * BOSS_SPEED_MULTIPLIER;
+  boss.slowedSpeed = enemyType.slowedSpeed * BOSS_SPEED_MULTIPLIER;
+  boss.baseTint = 0x7d3cff;
+  boss.setDisplaySize(bossSize, bossSize);
+  configureEnemyBody(boss, { bodyScale: 0.42 });
+  boss.setTint(0x7d3cff);
+  boss.play(enemyType.anim);
+  boss.setFlipX(player.x < boss.x);
+  boss.maxHp = getBossMaxHp(enemyMaxHp);
+  boss.hp = boss.maxHp;
+  boss.burnUntil = 0;
+  boss.stunnedUntil = 0;
+  boss.bossSpawnMinute = Math.floor(seconds / 60);
+
+  const aura = this.add.circle(x, y, bossSize * 0.36, 0x7d3cff, 0)
+    .setStrokeStyle(5, 0xc9a34a, 0.8)
+    .setDepth(17);
+  boss.bossAura = aura;
+  this.tweens.add({
+    targets: aura,
+    scale: { from: 0.92, to: 1.16 },
+    alpha: { from: 0.85, to: 0.35 },
+    duration: 850,
+    yoyo: true,
+    repeat: -1,
+    ease: "Sine.easeInOut",
+  });
+
+  enemies.add(boss);
+  showBossWarning.call(this, seconds);
+}
+
+function checkBossSpawn(seconds = getCurrentSurvivalSeconds()) {
+  if (!runStarted || isDead) return;
+  while (seconds >= nextBossSpawnSeconds) {
+    spawnBoss.call(this, nextBossSpawnSeconds);
+    nextBossSpawnSeconds += BOSS_SPAWN_INTERVAL_SECONDS;
+  }
+}
+
 function spawnEnemyWave() {
   const current = enemies.getLength();
   if (current >= MAX_ENEMIES) return;
@@ -3494,8 +4100,8 @@ function increaseEnemyMaxHp() {
   enemyMaxHp += ENEMY_HEALTH_FLAT_INCREASE;
   enemies.getChildren().forEach((enemy) => {
     if (!enemy.active) return;
-    const previousEnemyMaxHp = enemy.maxHp || getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp - ENEMY_HEALTH_FLAT_INCREASE, enemy.isElite);
-    const nextEnemyMaxHp = getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp, enemy.isElite);
+    const previousEnemyMaxHp = enemy.maxHp || (enemy.isBoss ? getBossMaxHp(enemyMaxHp - ENEMY_HEALTH_FLAT_INCREASE) : getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp - ENEMY_HEALTH_FLAT_INCREASE, enemy.isElite));
+    const nextEnemyMaxHp = enemy.isBoss ? getBossMaxHp(enemyMaxHp) : getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp, enemy.isElite);
     enemy.maxHp = nextEnemyMaxHp;
     enemy.hp = Math.min(nextEnemyMaxHp, (enemy.hp || 0) + Math.max(1, nextEnemyMaxHp - previousEnemyMaxHp));
     showEnemyGrowthPulse.call(this, enemy.x, enemy.y);
@@ -3534,12 +4140,20 @@ function increaseEnemySpawnAmount() {
 
 // ─── 전투 ────────────────────────────────────────────────
 function handleBulletHit(bullet, enemy) {
+  if (!bullet.active || !enemy.active) return;
+  if (!bullet.hitEnemies) bullet.hitEnemies = new Set();
+  if (bullet.hitEnemies.has(enemy)) return;
+  bullet.hitEnemies.add(enemy);
+  if (!bullet.itemPierceApplied) {
+    bullet.pierce = (bullet.pierce || 0) + getProjectilePierceBonus();
+    bullet.itemPierceApplied = true;
+  }
   damageEnemy.call(this, enemy, bullet.damage || 1);
   if (bullet.explodeRadius) {
     explode.call(this, bullet.x, bullet.y, bullet.explodeRadius, bullet.explodeDamage || 1,
       bullet.poisonOnExplode ? { poison: true } : {});
   }
-  if (bullet.splitOnHit) splitMissile.call(this, bullet.x, bullet.y);
+  if (bullet.splitOnHit) splitMissile.call(this, bullet.x, bullet.y, bullet.splitCount || 3, bullet.splitDamage || getWeaponDamage("magicMissile", 5) * 0.45);
   if (bullet.pierce && bullet.pierce > 0) {
     bullet.pierce--;
     bullet.target = findNearestEnemy(enemy);
@@ -3551,7 +4165,7 @@ function handleBulletHit(bullet, enemy) {
 function damageEnemy(enemy, amount = 1, options = {}) {
   if (!enemy || !enemy.active) return;
   const isCrit = Math.random() < getPlayerCritChance();
-  const finalDamage = amount * getPlayerAttackMultiplier() * (isCrit ? PLAYER_CRIT_DAMAGE_MULTIPLIER : 1);
+  const finalDamage = amount * getPlayerAttackMultiplier() * getHealthyEnemyDamageMultiplier(enemy) * (isCrit ? getPlayerCritDamageMultiplier() : 1);
   enemy.hp -= finalDamage;
 
   // setFillStyle → setTint로 교체
@@ -3565,20 +4179,30 @@ function damageEnemy(enemy, amount = 1, options = {}) {
 
   // 변경 후 — 깔끔하게 단일 처리
 if (enemy.hp <= 0) {
+    spreadPoisonFromDeadEnemy.call(this, enemy);
+    trySpawnLichSummon.call(this, enemy);
     enemies.remove(enemy);
+    enemy.bossAura?.destroy();
     enemy.body.setVelocity(0, 0);
     enemy.body.moves = false;
+
+    const dropEnemyReward = () => {
+        showDeathBurst.call(this, enemy.x, enemy.y);
+        if (enemy.isBoss) {
+            handleBossDefeated.call(this, enemy.x, enemy.y);
+        } else {
+            spawnExpOrb.call(this, enemy.x, enemy.y, enemy.isElite ? "red" : "normal");
+        }
+    };
 
     if (enemy.anims) {
         enemy.play(enemy.deathAnim || "enemy_die");
         enemy.once("animationcomplete", () => {
-            showDeathBurst.call(this, enemy.x, enemy.y);
-            spawnExpOrb.call(this, enemy.x, enemy.y, enemy.isElite ? "red" : "normal");
+            dropEnemyReward();
             enemy.destroy();
         });
     } else {
-        showDeathBurst.call(this, enemy.x, enemy.y);
-        spawnExpOrb.call(this, enemy.x, enemy.y, enemy.isElite ? "red" : "normal");
+        dropEnemyReward();
         enemy.destroy();
     }
     return;
@@ -3621,6 +4245,67 @@ function spawnExpOrb(x, y, dropType = "normal") {
   });
 }
 
+function handleBossDefeated(x, y) {
+  enemies.getChildren().forEach((target) => {
+    if (!target.active) return;
+    target.bossAura?.destroy();
+    enemies.remove(target);
+    showDeathBurst.call(this, target.x, target.y);
+    target.destroy();
+  });
+  bullets.getChildren().forEach((bullet) => { if (bullet.active) bullet.destroy(); });
+  spawnTreasureChest.call(this, x, y);
+  isTreasurePending = true;
+  enemySpawnRemainder = 0;
+  setGameplayTimersPaused(true);
+  showTreasureNotice.call(this);
+}
+
+function spawnTreasureChest(x, y) {
+  if (!treasureChests) return;
+  const chest = this.add.container(x, y).setDepth(70);
+  const glow = this.add.circle(0, 0, 46, 0xffd45a, 0.2).setBlendMode(Phaser.BlendModes.ADD);
+  const body = this.add.rectangle(0, 6, 58, 38, 0x8b4a20, 1).setStrokeStyle(3, 0xffd45a, 0.9);
+  const lid = this.add.rectangle(0, -16, 64, 24, 0x5b2f16, 1).setStrokeStyle(3, 0xffe28a, 0.9);
+  const lock = this.add.rectangle(0, 4, 12, 16, 0xffd45a, 1).setStrokeStyle(1, 0xffffff, 0.7);
+  chest.add([glow, body, lid, lock]);
+  chest.chestGlow = glow;
+  this.physics.add.existing(chest);
+  chest.body.setAllowGravity(false);
+  chest.body.setImmovable(true);
+  chest.body.setSize(72, 62);
+  treasureChests.add(chest);
+  this.tweens.add({ targets: chest, y: y - 10, duration: 760, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+  this.tweens.add({ targets: glow, scale: 1.25, alpha: 0.08, duration: 620, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+}
+
+function collectTreasureChest(chest) {
+  if (!chest?.active) return;
+  chest.chestGlow?.destroy();
+  chest.destroy();
+  pauseGameplay.call(this);
+  showItemSelection.call(this);
+}
+
+function applyTreasureItem(item) {
+  const stats = ensureItemStats();
+  Object.entries(item.stats || {}).forEach(([key, value]) => {
+    stats[key] = (stats[key] || 0) + value;
+  });
+  ownedItems.push(item.id);
+  if (item.stats?.maxHpFlat || item.stats?.maxHpPercent) {
+    const previousMax = playerMaxHp;
+    playerMaxHp = Math.max(1, Math.round((playerMaxHp + (item.stats.maxHpFlat || 0)) * (1 + (item.stats.maxHpPercent || 0))));
+    playerHp = Math.max(1, Math.min(playerMaxHp, playerHp + (playerMaxHp - previousMax)));
+    updateHealthBar();
+  }
+  updateWeaponHud();
+}
+
+function getRandomTreasureItems(count = 3) {
+  return Phaser.Utils.Array.Shuffle([...TREASURE_ITEMS]).slice(0, count);
+}
+
 function explode(x, y, radius, damage = 1, options = {}) {
   const blast = this.add.circle(x, y, radius, 0xffaa33, 0.24).setDepth(40);
   const ring = this.add.circle(x, y, radius * 0.45, 0xffdd88, 0).setStrokeStyle(4, 0xffdd88, 0.9).setDepth(41);
@@ -3635,10 +4320,78 @@ function explode(x, y, radius, damage = 1, options = {}) {
     if (Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y) <= radius) {
       damageEnemy.call(this, enemy, damage, { countAttack: options?.countAttack ?? false });
       if (options?.poison && enemy.active) {
-        enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, this.time.now + 3000);
+        enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, this.time.now + 3000 * getStatusDurationMultiplier());
         enemy.poisonDamage = 0.7; enemy.nextPoisonTick = 0;
       }
     }
+  });
+}
+
+function spreadPoisonFromDeadEnemy(enemy) {
+  if (!enemy || !hasWeaponLevel("skull", 7)) return;
+  const now = this.time.now;
+  if (!(enemy.poisonUntil > now)) return;
+  const radius = 260;
+  const poisonDamage = Math.max(enemy.poisonDamage || 0.7, getWeaponDamage("skull", 7) * 0.22);
+  const ring = this.add.circle(enemy.x, enemy.y, radius, 0x99ff66, 0)
+    .setStrokeStyle(4, 0x99ff66, 0.75)
+    .setDepth(44);
+  this.tweens.add({ targets: ring, alpha: 0, scale: 1.18, duration: 420, ease: "Cubic.easeOut", onComplete: () => ring.destroy() });
+  findEnemiesInRange(enemy.x, enemy.y, radius, 12).forEach((target) => {
+    if (!target.active || target === enemy) return;
+    target.poisonUntil = Math.max(target.poisonUntil || 0, now + 3000 * getStatusDurationMultiplier());
+    target.poisonDamage = poisonDamage;
+    target.nextPoisonTick = 0;
+    target.setTint(0x99ff66);
+  });
+}
+
+function trySpawnLichSummon(enemy) {
+  const skull = weaponManager?.getWeapon("skull");
+  if (!skull?.isEvolved("lich")) return;
+  if (Phaser.Math.Distance.Between(player.x, player.y, enemy.x, enemy.y) > 260 * getAttackRangeMultiplier()) return;
+  if (Math.random() >= 0.1) return;
+  const hp = Math.max(1, (enemy.maxHp || enemy.hp || 10) * 0.5);
+  const textureKey = enemy.texture?.key || ENEMY_TYPES[enemy.enemyType]?.texture || "enemy_walk";
+  const summon = this.add.sprite(enemy.x, enemy.y, textureKey, enemy.frame?.name).setDepth(32);
+  summon.setDisplaySize(enemy.displayWidth || 64, enemy.displayHeight || 64);
+  summon.setTint(0x55aaff);
+  summon.setAlpha(0.92);
+  if (enemy.anims?.currentAnim?.key) {
+    try { summon.play(enemy.anims.currentAnim.key); } catch {}
+  } else {
+    const enemyType = ENEMY_TYPES[enemy.enemyType] || ENEMY_TYPES.normal;
+    try { summon.play(enemyType.anim); } catch {}
+  }
+  summon.hp = hp;
+  summon.maxHp = hp;
+  summon.lastAttack = 0;
+  friendlySummons.push(summon);
+}
+
+function updateFriendlySummons(time, delta) {
+  if (!friendlySummons.length) return;
+  const damage = getWeaponDamage("skull", 7) * 0.45;
+  friendlySummons = friendlySummons.filter((summon) => summon?.active);
+  friendlySummons.forEach((summon) => {
+    const target = findEnemiesInRange(summon.x, summon.y, 420, 1)[0];
+    if (target?.active) {
+      const angle = Phaser.Math.Angle.Between(summon.x, summon.y, target.x, target.y);
+      summon.x += Math.cos(angle) * 90 * (delta / 1000);
+      summon.y += Math.sin(angle) * 90 * (delta / 1000);
+      summon.setFlipX?.(target.x < summon.x);
+      if (time > summon.lastAttack + 650 && Phaser.Math.Distance.Between(summon.x, summon.y, target.x, target.y) < 54) {
+        summon.lastAttack = time;
+        damageEnemy.call(this, target, damage);
+      }
+    }
+    enemies.getChildren().forEach((enemy) => {
+      if (!enemy.active) return;
+      if (Phaser.Math.Distance.Between(summon.x, summon.y, enemy.x, enemy.y) < 42) {
+        summon.hp -= CONTACT_DAMAGE_PER_SEC * (delta / 1000) * 0.75;
+      }
+    });
+    if (summon.hp <= 0) summon.destroy();
   });
 }
 
@@ -3648,12 +4401,12 @@ function updateProjectiles(time) {
       bullet.nextTrail = time + 45;
       showTrailDot.call(this, bullet.x, bullet.y, bullet.trailColor, bullet.trailSize || bullet.radius || 5);
     }
-    if (bullet.homing && bullet.target && bullet.target.active)
+    if (bullet.homing && bullet.target && bullet.target.active && (!bullet.homingDelayUntil || time >= bullet.homingDelayUntil))
       this.physics.moveToObject(bullet, bullet.target, bullet.speed || 520);
     if (bullet.isTracer && bullet.body)
       bullet.rotation = Math.atan2(bullet.body.velocity.y, bullet.body.velocity.x);
     if (bullet.burn && bullet.target && bullet.target.active)
-      bullet.target.burnUntil = Math.max(bullet.target.burnUntil || 0, time + 1200);
+      bullet.target.burnUntil = Math.max(bullet.target.burnUntil || 0, time + 1200 * getStatusDurationMultiplier());
     if (bullet.x < player.x - 1600 || bullet.x > player.x + 1600 || bullet.y < player.y - 1600 || bullet.y > player.y + 1600)
       bullet.destroy();
   });
@@ -3674,18 +4427,21 @@ function updateProjectiles(time) {
 
 // ─── 투사체 생성 ─────────────────────────────────────────
 function createProjectile(scene, x, y, color, radius = 6) {
-  const bullet = scene.add.circle(x, y, radius, color);
+  const scaledRadius = radius * getProjectileSizeMultiplier();
+  const bullet = scene.add.circle(x, y, scaledRadius, color);
   scene.physics.add.existing(bullet);
-  bullet.trailColor = color; bullet.trailSize = radius;
+  if (bullet.body) bullet.body.setCircle(scaledRadius);
+  bullet.trailColor = color; bullet.trailSize = scaledRadius;
   bullets.add(bullet);
   return bullet;
 }
 
 function createTracerProjectile(scene, x, y, angle, color = 0xffff66) {
-  const bullet = scene.add.rectangle(x, y, 22, 3, color, 0.95).setRotation(angle).setDepth(24);
+  const scale = getProjectileSizeMultiplier();
+  const bullet = scene.add.rectangle(x, y, 22 * scale, 3 * scale, color, 0.95).setRotation(angle).setDepth(24);
   scene.physics.add.existing(bullet);
-  bullet.body.setSize(22, 3);
-  bullet.isTracer = true; bullet.trailColor = color; bullet.trailSize = 3;
+  bullet.body.setSize(22 * scale, 3 * scale);
+  bullet.isTracer = true; bullet.trailColor = color; bullet.trailSize = 3 * scale;
   bullets.add(bullet);
   return bullet;
 }
@@ -3812,7 +4568,8 @@ function findNearestEnemy(excludeEnemy = null) {
 }
 
 function findEnemiesInRange(x, y, range, limit = Infinity) {
-  const rangeSq = range * range;
+  const scaledRange = range * getAttackRangeMultiplier();
+  const rangeSq = scaledRange * scaledRange;
   const children = enemies.getChildren();
 
   if (limit === Infinity) {
@@ -3841,10 +4598,10 @@ function findEnemiesInRange(x, y, range, limit = Infinity) {
   });
   return entries.map((entry) => entry.enemy);
 }
-function splitMissile(x, y) {
-  findEnemiesInRange(x, y, 650, 3).forEach((target) => {
+function splitMissile(x, y, count = 3, damage = getWeaponDamage("magicMissile", 5) * 0.45) {
+  findEnemiesInRange(x, y, 650, count).forEach((target) => {
     const bullet = createProjectile(this, x, y, 0xd6a6ff, 5);
-    bullet.damage = getWeaponDamage("magicMissile", 5) * 0.45;
+    bullet.damage = damage;
     bullet.homing = true; bullet.target = target; bullet.speed = 520;
     this.physics.moveToObject(bullet, target, bullet.speed);
   });
@@ -3896,7 +4653,7 @@ function applyContactDamage(delta) {
   });
   if (!touchingEnemy) return;
 
-  const damage = CONTACT_DAMAGE_PER_SEC * (delta / 1000);
+  const damage = CONTACT_DAMAGE_PER_SEC * (delta / 1000) * getDamageTakenMultiplier();
   playerHp -= damage;
   player.setTint(0xff8888);
 
@@ -3960,11 +4717,16 @@ function killPlayer() {
     isDead = false; exp = 0; level = 1; expToNextLevel = 5;
     playerHp = 100; playerMaxHp = 100;
     enemyMaxHp = BASE_ENEMY_MAX_HP; enemySpawnBonus = 0; enemySpawnRemainder = 0;
+    nextBossSpawnSeconds = BOSS_SPAWN_INTERVAL_SECONDS;
     activeSurvivalMs = 0; runStarted = false; isManualPaused = false;
     hidePauseOverlay();
     runEndedBySurrender = false;
+    isTreasurePending = false;
     devTimeAdjustedThisRun = false;
     passiveLevels = {};
+    itemStats = createEmptyItemStats();
+    ownedItems = [];
+    friendlySummons = [];
     playerVelocity.x = 0; playerVelocity.y = 0;
     this.scene.restart();
   };
@@ -4069,6 +4831,7 @@ function showStartScreen() {
     updateWeaponHud();
     runStarted = true;
     activeSurvivalMs = 0;
+    nextBossSpawnSeconds = BOSS_SPAWN_INTERVAL_SECONDS;
     lastTimerSecond = -1;
     timerText.setText("00:00");
     this.physics.resume();
@@ -4212,7 +4975,7 @@ function showDevPanel() {
     const select = document.createElement("select");
     select.style.cssText = "background:#1a2030;border:1px solid #334;color:#fff;padding:3px 6px;border-radius:4px;font-size:12px;";
     const noneOpt = document.createElement("option"); noneOpt.value = "0"; noneOpt.textContent = "없음"; select.appendChild(noneOpt);
-    for (let i = 1; i <= 5; i++) { const opt = document.createElement("option"); opt.value = String(i); opt.textContent = `Lv.${i}`; select.appendChild(opt); }
+    for (let i = 1; i <= WEAPON_MAX_LEVEL; i++) { const opt = document.createElement("option"); opt.value = String(i); opt.textContent = `Lv.${i}`; select.appendChild(opt); }
     const owned = weaponManager.getWeapon(weapon.id);
     select.value = owned ? String(owned.level) : "0";
     select.addEventListener("change", () => {
@@ -4230,6 +4993,40 @@ function showDevPanel() {
   });
 
   // 길 섹션
+  const evolutionTitle = document.createElement("div");
+  evolutionTitle.textContent = "진화 무기";
+  evolutionTitle.style.cssText = "color:#ffd56a;font-size:13px;font-weight:bold;letter-spacing:2px;margin-top:16px;border-top:1px solid #223;padding-top:12px;margin-bottom:10px;";
+  panel.appendChild(evolutionTitle);
+
+  EVOLUTION_RECIPES.forEach((recipe) => {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;";
+    const label = document.createElement("span");
+    label.textContent = recipe.name;
+    label.style.cssText = "width:120px;font-size:12px;color:#fff0a6;";
+    const applyBtn = document.createElement("button");
+    applyBtn.textContent = "적용";
+    applyBtn.style.cssText = "background:transparent;border:1px solid #ffd56a;color:#ffd56a;padding:3px 10px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:12px;";
+    applyBtn.addEventListener("click", () => {
+      devForceEvolution(recipe);
+      removeDevPanel();
+      showDevPanel();
+    });
+    const removeBtn = document.createElement("button");
+    removeBtn.textContent = "해제";
+    removeBtn.style.cssText = "background:transparent;border:1px solid #ff7777;color:#ff7777;padding:3px 10px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:12px;";
+    removeBtn.addEventListener("click", () => {
+      devRemoveEvolution(recipe);
+      removeDevPanel();
+      showDevPanel();
+    });
+    row.appendChild(label);
+    row.appendChild(applyBtn);
+    row.appendChild(removeBtn);
+    panel.appendChild(row);
+  });
+
+  if (false) {
   const pathTitle = document.createElement("div");
   pathTitle.textContent = "🐉 길 시스템";
   pathTitle.style.cssText = "color:#ffdd44;font-size:13px;font-weight:bold;letter-spacing:2px;margin-top:16px;border-top:1px solid #223;padding-top:12px;margin-bottom:10px;";
@@ -4265,6 +5062,8 @@ function showDevPanel() {
     row.appendChild(label); row.appendChild(btn); panel.appendChild(row);
   });
 
+  }
+
   const closeBtn = document.createElement("button");
   closeBtn.textContent = "닫기";
   closeBtn.style.cssText = "margin-top:16px;width:100%;background:transparent;border:1px solid #00ffd5;color:#00ffd5;padding:6px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:13px;letter-spacing:2px;";
@@ -4298,6 +5097,47 @@ function createDevButton() {
 function removeDevButton() { if (devBtnEl) { devBtnEl.remove(); devBtnEl = null; } }
 
 // ─── 경고 텍스트 ──────────────────────────────────────────
+function showBossWarning(seconds = getCurrentSurvivalSeconds()) {
+  const cx = this.scale.width / 2, cy = this.scale.height / 2;
+  const minute = Math.max(5, Math.floor(seconds / 60));
+  const title = this.add.text(cx, cy - 32, "BOSS APPROACHING", {
+    fontSize: "42px",
+    color: "#ffd56a",
+    fontStyle: "bold",
+    shadow: { blur: 20, color: "#7d3cff", fill: true },
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(4200);
+  const sub = this.add.text(cx, cy + 28, `${minute}분 보스 등장`, {
+    fontSize: "20px",
+    color: "#f8fafc",
+    fontStyle: "bold",
+    letterSpacing: 2,
+    shadow: { blur: 12, color: "#000000", fill: true },
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(4200);
+  const flash = this.add.circle(cx, cy, 40, 0x7d3cff, 0.18)
+    .setScrollFactor(0).setDepth(4199);
+  this.tweens.add({ targets: flash, scale: 9, alpha: 0, duration: 650, ease: "Cubic.easeOut", onComplete: () => flash.destroy() });
+  this.tweens.add({ targets: title, alpha: 0, scale: 1.12, y: cy - 72, duration: 1800, delay: 900, ease: "Cubic.easeIn", onComplete: () => title.destroy() });
+  this.tweens.add({ targets: sub, alpha: 0, y: cy + 8, duration: 1500, delay: 1100, ease: "Cubic.easeIn", onComplete: () => sub.destroy() });
+}
+
+function showTreasureNotice() {
+  const cx = this.scale.width / 2, cy = this.scale.height / 2;
+  const title = this.add.text(cx, cy - 28, "TREASURE DROPPED", {
+    fontSize: "36px",
+    color: "#ffd56a",
+    fontStyle: "bold",
+    shadow: { blur: 18, color: "#000000", fill: true },
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(4200);
+  const sub = this.add.text(cx, cy + 24, "보물상자를 획득하세요", {
+    fontSize: "18px",
+    color: "#fff0a6",
+    fontStyle: "bold",
+    shadow: { blur: 12, color: "#000000", fill: true },
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(4200);
+  this.tweens.add({ targets: title, alpha: 0, y: cy - 68, duration: 1700, delay: 700, ease: "Cubic.easeIn", onComplete: () => title.destroy() });
+  this.tweens.add({ targets: sub, alpha: 0, y: cy - 4, duration: 1500, delay: 900, ease: "Cubic.easeIn", onComplete: () => sub.destroy() });
+}
+
 function showWarningText() {
   const cx = this.scale.width / 2, cy = this.scale.height / 2;
   const warn = this.add.text(cx, cy, "⚠ 대규모 침공!", { fontSize: "38px", color: "#ff4444", fontStyle: "bold", shadow: { blur: 16, color: "#ff0000", fill: true } }).setOrigin(0.5).setScrollFactor(0).setDepth(4000);
