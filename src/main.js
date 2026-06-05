@@ -31,6 +31,10 @@ const BOSS_RED_ORB_REWARD = 3;
 const WEAPON_MAX_LEVEL = 7;
 const PLAYER_BASE_CRIT_CHANCE = 0.05;
 const PLAYER_CRIT_DAMAGE_MULTIPLIER = 5;
+const DAMAGE_NUMBER_WINDOW_MS = 100;
+const DAMAGE_NUMBER_MAX_PER_WINDOW = 18;
+const DAMAGE_NUMBER_PER_ENEMY_MS = 120;
+const RANGE_QUERY_CACHE_MS = 50;
 const EXP_ORB_LIFETIME_MS = 60000;
 const EXP_ORB_DROP_RATE = 0.75;
 const ORANGE_EXP_BASE_RATE = 0.05;
@@ -260,6 +264,9 @@ let timerText = null, devBtnEl = null, lastMoveAngle = 0;
 let activeSurvivalMs = 0, runStarted = false, isManualPaused = false, isPageHiddenPaused = false;
 let pauseBtnBg = null, pauseBtnText = null, pauseOverlay = null, pauseOverlayText = null, pauseRecipeBg = null, pauseRecipeText = null, pauseSurrenderBg = null, pauseSurrenderText = null;
 let runEndedBySurrender = false;
+let damageNumberWindowStart = 0, damageNumberCount = 0;
+let activeEnemySnapshot = [], activeEnemySnapshotBucket = -1;
+let rangeQueryCache = new Map(), rangeQueryCacheBucket = -1;
 let bgChunks = new Map();
 let profilePanelEl = null, rankingPanelEl = null, nicknamePromptEl = null;
 let chatPanelEl = null, chatMessagesEl = null, chatInputEl = null, chatStatusEl = null, chatPollTimer = null;
@@ -4613,7 +4620,11 @@ function damageEnemy(enemy, amount = 1, options = {}) {
   enemy.setTint(enemy.stunnedUntil > this.time.now ? 0x99ddff : 0xff3355);
 
   showHitFlash.call(this, enemy.x, enemy.y);
-  showDamageNumber.call(this, enemy.x, enemy.y - (enemy.displayHeight || 64) * 0.42, finalDamage, isCrit);
+  const now = this.time?.now || 0;
+  if (isCrit || now > (enemy.lastDamageNumberAt || 0) + DAMAGE_NUMBER_PER_ENEMY_MS) {
+    enemy.lastDamageNumberAt = now;
+    showDamageNumber.call(this, enemy.x, enemy.y - (enemy.displayHeight || 64) * 0.42, finalDamage, isCrit);
+  }
 
   // 만상무예 카운트
   if (options.countAttack !== false && pathManager && !weaponManager?.isMuBonusCasting) pathManager.countAttack();
@@ -4905,6 +4916,14 @@ function showHitFlash(x, y) {
 }
 
 function showDamageNumber(x, y, damage, isCrit = false) {
+  const now = this.time?.now || 0;
+  if (now > damageNumberWindowStart + DAMAGE_NUMBER_WINDOW_MS) {
+    damageNumberWindowStart = now;
+    damageNumberCount = 0;
+  }
+  if (damageNumberCount >= DAMAGE_NUMBER_MAX_PER_WINDOW && !isCrit) return;
+  damageNumberCount++;
+
   const text = makeText(this, x + Phaser.Math.Between(-10, 10), y, formatDamage(damage * 10), {
     fontSize: isCrit ? "18px" : "13px", color: isCrit ? "#ff4d4d" : "#fff0a6", fontStyle: "900", strokeThickness: 3,
   }).setOrigin(0.5).setDepth(120);
@@ -4997,9 +5016,30 @@ function showLaserBeam(scene, startX, startY, endX, endY, burn = false) {
 }
 
 // ─── 유틸 ────────────────────────────────────────────────
+function getQueryCacheBucket() {
+  return Math.floor((gameSceneRef?.time?.now || 0) / RANGE_QUERY_CACHE_MS);
+}
+
+function getActiveEnemiesSnapshot() {
+  const bucket = getQueryCacheBucket();
+  if (activeEnemySnapshotBucket !== bucket) {
+    activeEnemySnapshotBucket = bucket;
+    activeEnemySnapshot = enemies?.getChildren().filter((enemy) => enemy?.active) || [];
+  }
+  return activeEnemySnapshot;
+}
+
+function resetEnemyQueryCache() {
+  const bucket = getQueryCacheBucket();
+  if (rangeQueryCacheBucket !== bucket) {
+    rangeQueryCacheBucket = bucket;
+    rangeQueryCache.clear();
+  }
+}
+
 function findNearestEnemy(excludeEnemy = null) {
   let nearest = null, shortestDistanceSq = Infinity;
-  enemies.getChildren().forEach((enemy) => {
+  getActiveEnemiesSnapshot().forEach((enemy) => {
     if (enemy === excludeEnemy || !enemy.active) return;
     const dx = player.x - enemy.x, dy = player.y - enemy.y;
     const distanceSq = dx * dx + dy * dy;
@@ -5009,9 +5049,16 @@ function findNearestEnemy(excludeEnemy = null) {
 }
 
 function findEnemiesInRange(x, y, range, limit = Infinity) {
+  resetEnemyQueryCache();
   const scaledRange = range * getAttackRangeMultiplier();
   const rangeSq = scaledRange * scaledRange;
-  const children = enemies.getChildren();
+  const quantizedX = Math.round(x);
+  const quantizedY = Math.round(y);
+  const quantizedRange = Math.round(scaledRange);
+  const cacheKey = `${quantizedX}:${quantizedY}:${quantizedRange}:${limit}`;
+  const cached = rangeQueryCache.get(cacheKey);
+  if (cached) return cached.filter((enemy) => enemy?.active);
+  const children = getActiveEnemiesSnapshot();
 
   if (limit === Infinity) {
     const entries = [];
@@ -5022,7 +5069,9 @@ function findEnemiesInRange(x, y, range, limit = Infinity) {
       if (distanceSq <= rangeSq) entries.push({ enemy, distanceSq });
     });
     entries.sort((a, b) => a.distanceSq - b.distanceSq);
-    return entries.map((entry) => entry.enemy);
+    const result = entries.map((entry) => entry.enemy);
+    rangeQueryCache.set(cacheKey, result);
+    return result;
   }
 
   const entries = [];
@@ -5037,7 +5086,9 @@ function findEnemiesInRange(x, y, range, limit = Infinity) {
     entries.splice(insertAt, 0, { enemy, distanceSq });
     if (entries.length > limit) entries.length = limit;
   });
-  return entries.map((entry) => entry.enemy);
+  const result = entries.map((entry) => entry.enemy);
+  rangeQueryCache.set(cacheKey, result);
+  return result;
 }
 function splitMissile(x, y, count = 3, damage = getWeaponDamage("magicMissile", 5) * 0.45) {
   findEnemiesInRange(x, y, 650, count).forEach((target) => {
