@@ -66,7 +66,7 @@ const EVOLUTION_RECIPES = [
   { id: "comet", weapon: "magicMissile", item: "giantDevice", name: "혜성", icon: "CM", color: 0xd6a6ff, desc: "미사일 수 감소 / 쿨타임 증가 / 공격력+폭발 범위 대폭 증가" },
   { id: "eventHorizon", weapon: "blackHole", item: "giantDevice", name: "사건의 지평선", icon: "EH", color: 0xaa44ff, desc: "반경과 흡입력 2배 / 단일 초대형 블랙홀" },
   { id: "absoluteBind", weapon: "chain", item: "lightningRod", name: "절대 속박", icon: "AB", color: 0x88bbff, desc: "연결 적을 거의 정지시키고 중심으로 끌어당김" },
-  { id: "reaper", weapon: "scythe", item: "beastFang", name: "사신", icon: "RP", color: 0x88ffcc, desc: "플레이어 주변 사신 3기가 자동 대낫 시전" },
+  { id: "reaper", weapon: "scythe", item: "beastFang", name: "사신", icon: "RP", color: 0x88ffcc, desc: "플레이어 주변 사신 3기가 원래 크기의 대낫을 자동 시전" },
   { id: "lich", weapon: "skull", item: "redCrystal", name: "리치", icon: "LC", color: 0xcc99ff, desc: "무한 독 장판 / 처치 시 확률로 소환수 생성" },
 ];
 const BEST_RECORD_STORAGE_KEY = "abyssWalker.bestRecord";
@@ -1651,13 +1651,13 @@ class ScytheWeapon extends AutoWeapon {
     if (this.level >= 5) this.scene.time.delayedCall(600, () => this.spawnWhirlwind());
     weaponManager.countCast(() => this.tick(time));
   }
-  swing(time) {
+  swing(time, originX = player.x, originY = player.y, angleOffset = 0) {
     const rangeScale = this.level >= 6 ? 2 : 1;
     const range = 250 * rangeScale;
-    const baseAngle = lastMoveAngle - Math.PI * 0.85;
+    const baseAngle = lastMoveAngle - Math.PI * 0.85 + angleOffset;
     const damage = getWeaponDamage(this.type, this.level);
     const hitCooldown = new Map();
-    const scythe = this.scene.add.image(player.x, player.y, "death-scythe")
+    const scythe = this.scene.add.image(originX, originY, "death-scythe")
       .setDisplaySize(range * 1.65, range * 1.65)
       .setDepth(29)
       .setAlpha(1)
@@ -1672,7 +1672,7 @@ class ScytheWeapon extends AutoWeapon {
       { distance: 224, angleOffset: -0.56, radius: 26 },
     ].map((spec) => ({ ...spec, distance: spec.distance * rangeScale, radius: spec.radius * rangeScale }));
     const hitboxes = hitboxSpecs.map((spec) => {
-      const hitbox = this.scene.add.circle(player.x, player.y, spec.radius, 0x88ffcc, 0).setDepth(28);
+      const hitbox = this.scene.add.circle(originX, originY, spec.radius, 0x88ffcc, 0).setDepth(28);
       this.scene.physics.add.existing(hitbox);
       hitbox.body.setAllowGravity(false);
       hitbox.body.setImmovable(true);
@@ -1682,15 +1682,15 @@ class ScytheWeapon extends AutoWeapon {
     });
 
     const syncScythe = (angle) => {
-      scythe.setPosition(player.x, player.y);
+      scythe.setPosition(originX, originY);
       scythe.setRotation(angle);
 
       hitboxes.forEach((hitbox) => {
         const spec = hitbox._scytheSpec;
         const hitAngle = angle + spec.angleOffset;
         hitbox.setPosition(
-          player.x + Math.cos(hitAngle) * spec.distance,
-          player.y + Math.sin(hitAngle) * spec.distance
+          originX + Math.cos(hitAngle) * spec.distance,
+          originY + Math.sin(hitAngle) * spec.distance
         );
         hitbox.body.updateFromGameObject();
       });
@@ -1728,7 +1728,7 @@ class ScytheWeapon extends AutoWeapon {
       }
     }});
 
-    const ring = this.scene.add.circle(player.x, player.y, range, 0xccffaa, 0).setStrokeStyle(3, 0xccffaa, 0.35).setDepth(27);
+    const ring = this.scene.add.circle(originX, originY, range, 0xccffaa, 0).setStrokeStyle(3, 0xccffaa, 0.35).setDepth(27);
     this.scene.tweens.add({ targets: ring, alpha: 0, scale: 1.15, duration: 400, ease: "Cubic.easeOut", onComplete: () => ring.destroy() });
 
   }
@@ -1755,23 +1755,9 @@ class ScytheWeapon extends AutoWeapon {
     });
   }
   reaperSwing(x, y, index = 0) {
-    const radius = 185 * 0.75;
-    const damage = getWeaponDamage(this.type, this.level);
-    const blade = this.scene.add.image(x, y, "death-scythe")
-      .setDisplaySize(radius * 2.2, radius * 2.2)
-      .setDepth(35)
-      .setAlpha(0.95)
-      .setOrigin(0.17, 0.78)
-      .setRotation(index * 2.1 - Math.PI * 0.85);
-    this.scene.tweens.add({
-      targets: blade,
-      rotation: blade.rotation + Math.PI * 2,
-      alpha: 0,
-      duration: 360,
-      ease: "Cubic.easeOut",
-      onComplete: () => blade.destroy(),
-    });
-    findEnemiesInRange(x, y, radius, 10).forEach((enemy) => damageEnemy.call(this.scene, enemy, damage));
+    for (let i = 0; i < 3; i++) {
+      this.scene.time.delayedCall(i * 280, () => this.swing(this.scene.time.now, x, y, index * 2.1 + i * 0.24));
+    }
   }
   spawnWhirlwind() {
     const duration = 1800, hitCooldown = new Map();
