@@ -5,8 +5,14 @@ const INITIAL_ENEMY_COUNT = 30;
 const INITIAL_SPAWN_DELAY = 420;
 const MIN_SPAWN_DELAY = 130;
 const BASE_ENEMY_SPAWN_PER_WAVE = 0.35;
+const ENEMY_RECYCLE_DISTANCE = 2200;
+const ENEMY_RECYCLE_CHECK_INTERVAL = 1000;
+const ENEMY_RECYCLE_MAX_PER_CHECK = 40;
 const ENEMY_HEALTH_FLAT_INTERVAL = 45000;
 const ENEMY_HEALTH_FLAT_INCREASE = 5;
+const ENEMY_HEALTH_LATE_START_SECONDS = 1800;
+const ENEMY_HEALTH_LATE_FLAT_INTERVAL = 30000;
+const ENEMY_HEALTH_LATE_FLAT_INCREASE = 7;
 const ENEMY_HEALTH_GROWTH_INTERVAL = 120000;
 const ENEMY_HEALTH_GROWTH_MULTIPLIER = 1.09;
 const BASE_ENEMY_MAX_HP = 5;
@@ -84,10 +90,11 @@ const WEAPON_TYPES = [
   { id: "scythe",       name: "대낫",      icon: "SC", color: 0x88ffcc, desc: ["전방 휩쓸기","범위 확대","2회 연속 베기","관통 낫날","회오리 소환","범위 2배, 피해 +50%","3회 연속 시전"] },
   { id: "blackHole",    name: "블랙홀",    icon: "BH", color: 0xaa44ff, desc: ["적 흡입 후 폭발","반경+피해 증가","2개 동시 소환","흡입 슬로우+폭발 스턴","미니 블랙홀 3개","범위 +40%","소멸 시 0.5초 스턴"] },
   { id: "chain",        name: "체인",      icon: "CH", color: 0x88bbff, desc: ["적 2마리 사슬 연결","연결 3마리","피해 공유","적 끌어당김","연결 5마리+사슬 폭발","공격력 +40%","전기 줄기 +1"] },
+  { id: "fake",         name: "전재영의 페이크", icon: "FK", color: 0x55aaff, desc: ["6초마다 분신 1명", "쿨타임 -1초", "분신 +1", "복제 시전 4회", "쿨타임 -2초", "분신 +1", "쿨타임 -2초"] },
 ];
 
 const PASSIVE_TYPES = [
-  { id: "agility", name: "민첩", icon: "AG", color: 0x66ffbb, stat: "이동속도", perLevel: 10, desc: "이동속도 10% 증가" },
+  { id: "gamble", name: "도박", icon: "GB", color: 0xffd45a, stat: "치명타 확률", perLevel: 5, desc: "치명타 확률 5% 증가" },
   { id: "rage", name: "분노", icon: "RG", color: 0xff6666, stat: "공격력", perLevel: 10, desc: "공격력 10% 증가" },
   { id: "pickpocket", name: "소매치기", icon: "PK", color: 0xffdd66, stat: "획득 범위", perLevel: 15, desc: "아이템 획득 범위 15% 증가" },
   { id: "training", name: "단련", icon: "TR", color: 0x88bbff, stat: "최대 체력", perLevel: 20, desc: "최대 체력 20 증가" },
@@ -238,6 +245,7 @@ let playerHp = 100, playerMaxHp = 100;
 let healthBarBg, healthBarGreen, healthBarRed;
 let healthBarWidth = 180;
 let isDead = false, lastDamageTime = 0;
+let lastEnemyRecycleCheck = 0;
 const CONTACT_DAMAGE_PER_SEC = 34;
 let gameStartTime = 0;
 let devMode = false, devPanelEl = null, gameSceneRef = null;
@@ -875,6 +883,9 @@ function setInternalSurvivalTime(seconds) {
   if (spawnTimer) {
     spawnTimer.delay = getEnemySpawnDelay(elapsedSeconds);
   }
+  if (enemyHealthTimer) {
+    enemyHealthTimer.delay = getEnemyFlatIntervalForCurrentTime();
+  }
   enemies?.getChildren().forEach((enemy) => {
     if (!enemy.active) return;
     enemy.maxHp = enemy.isBoss ? getBossMaxHp(enemyMaxHp) : getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp, enemy.isElite);
@@ -915,20 +926,33 @@ function getEnemySpawnDelay(seconds) {
 function getEnemyMaxHpAtTime(seconds) {
   let hp = BASE_ENEMY_MAX_HP;
   const flatIntervalSeconds = ENEMY_HEALTH_FLAT_INTERVAL / 1000;
+  const lateFlatIntervalSeconds = ENEMY_HEALTH_LATE_FLAT_INTERVAL / 1000;
   const percentIntervalSeconds = ENEMY_HEALTH_GROWTH_INTERVAL / 1000;
   let nextFlat = flatIntervalSeconds;
   let nextPercent = percentIntervalSeconds;
 
   while (nextFlat <= seconds || nextPercent <= seconds) {
     if (nextFlat <= nextPercent) {
-      hp += ENEMY_HEALTH_FLAT_INCREASE;
-      nextFlat += flatIntervalSeconds;
+      hp += nextFlat >= ENEMY_HEALTH_LATE_START_SECONDS ? ENEMY_HEALTH_LATE_FLAT_INCREASE : ENEMY_HEALTH_FLAT_INCREASE;
+      nextFlat += nextFlat >= ENEMY_HEALTH_LATE_START_SECONDS ? lateFlatIntervalSeconds : flatIntervalSeconds;
     } else {
       hp = Math.ceil(hp * ENEMY_HEALTH_GROWTH_MULTIPLIER);
       nextPercent += percentIntervalSeconds;
     }
   }
   return hp;
+}
+
+function getEnemyFlatIncreaseForCurrentTime() {
+  return getCurrentSurvivalSeconds() >= ENEMY_HEALTH_LATE_START_SECONDS
+    ? ENEMY_HEALTH_LATE_FLAT_INCREASE
+    : ENEMY_HEALTH_FLAT_INCREASE;
+}
+
+function getEnemyFlatIntervalForCurrentTime() {
+  return getCurrentSurvivalSeconds() >= ENEMY_HEALTH_LATE_START_SECONDS
+    ? ENEMY_HEALTH_LATE_FLAT_INTERVAL
+    : ENEMY_HEALTH_FLAT_INTERVAL;
 }
 
 function getActiveSurvivalSeconds() {
@@ -1003,7 +1027,7 @@ function gainExp(amount = 1) {
 }
 
 function healOnLevelUp() {
-  playerHp = Math.min(playerMaxHp, playerHp + playerMaxHp * 0.2);
+  playerHp = Math.min(playerMaxHp, playerHp + playerMaxHp * 0.1);
   updateHealthBar();
 }
 
@@ -1971,16 +1995,17 @@ class ChainWeapon extends AutoWeapon {
     for (let i = 0; i < castCount; i++) this.performChainCast(i);
     weaponManager.countCast(() => this.tick(time));
   }
-  performChainCast(castIndex = 0) {
+  performChainCast(castIndex = 0, origin = player) {
     if (castIndex === 0) this.clearChains();
     const maxLinks = this.level >= 5 ? 5 : this.level >= 2 ? 3 : 2;
-    const candidates = findEnemiesInRange(player.x, player.y, 820, maxLinks * 2);
+    const originObj = origin?.active === false ? player : origin;
+    const candidates = findEnemiesInRange(originObj.x, originObj.y, 820, maxLinks * 2);
     const offset = castIndex * maxLinks;
     const targets = candidates.slice(offset, offset + maxLinks);
     if (targets.length < 1 && castIndex > 0) return;
     if (targets.length < 1) return;
     const damage = getWeaponDamage(this.type, this.level), duration = 1800;
-    const chainObjs = [], allTargets = [{ x: player.x, y: player.y }, ...targets];
+    const chainObjs = [], allTargets = [{ x: originObj.x, y: originObj.y }, ...targets];
     for (let i = 0; i < allTargets.length - 1; i++) chainObjs.push(this.drawChainLine(allTargets[i], allTargets[i + 1]));
     this.activeChains.push(...chainObjs);
     const hitCooldown = new Map(); let elapsed = 0;
@@ -1988,7 +2013,7 @@ class ChainWeapon extends AutoWeapon {
       elapsed += 16;
       chainObjs.forEach((obj, i) => {
         if (!obj.active) return;
-        const from = i === 0 ? player : targets[i - 1], to = targets[i];
+        const from = i === 0 ? (originObj?.active === false ? player : originObj) : targets[i - 1], to = targets[i];
         if (!from || !to || !to.active) { obj.destroy(); return; }
         this.updateChainLine(obj, from, to);
       });
@@ -2018,7 +2043,8 @@ class ChainWeapon extends AutoWeapon {
       }
       if (this.level >= 4) targets.forEach((enemy) => {
         if (!enemy.active) return;
-        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
+        const pullOrigin = originObj?.active === false ? player : originObj;
+        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, pullOrigin.x, pullOrigin.y);
         enemy.body.setVelocity(enemy.body.velocity.x + Math.cos(angle) * 30, enemy.body.velocity.y + Math.sin(angle) * 30);
       });
       if (elapsed >= duration) {
@@ -2042,6 +2068,408 @@ class ChainWeapon extends AutoWeapon {
     [from, to].forEach((pt) => { graphics.fillStyle(0xffffff, 0.9); graphics.fillCircle(pt.x, pt.y, 4.5); });
   }
   clearChains() { this.activeChains.forEach((obj) => { if (obj?.active) obj.destroy(); }); this.activeChains = []; }
+}
+
+class FakeWeapon extends AutoWeapon {
+  constructor(scene) {
+    super(scene, "fake", 6000);
+    this.clones = [];
+  }
+
+  tick(time, delta = 16) {
+    this.updateClones(time, delta);
+    this.clones = this.clones.filter((clone) => clone?.active);
+    const maxClones = this.getCloneCount();
+    if (this.clones.length >= maxClones) return;
+    if (!this.canFire(time, this.getCooldown())) return;
+    this.lastFire = time;
+    const spawnCount = maxClones - this.clones.length;
+    for (let i = 0; i < spawnCount; i++) {
+      this.scene.time.delayedCall(i * 120, () => {
+        if (this.clones.filter((clone) => clone?.active).length < this.getCloneCount()) {
+          this.spawnClone(this.clones.length + i);
+        }
+      });
+    }
+  }
+
+  getCooldown() {
+    let cooldown = 6000;
+    if (this.level >= 2) cooldown -= 1000;
+    if (this.level >= 5) cooldown -= 2000;
+    if (this.level >= 7) cooldown -= 2000;
+    return Math.max(1000, cooldown);
+  }
+
+  getCloneCount() {
+    return 1 + (this.level >= 3 ? 1 : 0) + (this.level >= 6 ? 2 : 0);
+  }
+
+  getCastLimit() {
+    return (this.level >= 4 ? 4 : 3) + (this.level >= 6 ? 2 : 0);
+  }
+
+  spawnClone(index = 0) {
+    if (!player?.active) return;
+    this.clones = this.clones.filter((clone) => clone?.active);
+    if (this.clones.length >= this.getCloneCount()) return;
+    const angle = (this.clones.length / Math.max(1, this.getCloneCount())) * Math.PI * 2;
+    const clone = this.scene.physics.add.sprite(
+      player.x + Math.cos(angle) * 92,
+      player.y + Math.sin(angle) * 92,
+      "player_1"
+    );
+    clone.setDisplaySize(player.displayWidth || 120, player.displayHeight || 120);
+    clone.setDepth((player.depth || 20) + 1);
+    clone.setTint(0x55aaff);
+    clone.setAlpha(0.78);
+    clone.setBlendMode(Phaser.BlendModes.ADD);
+    clone.setDrag(900);
+    clone.setMaxVelocity(360);
+    clone.body.setAllowGravity(false);
+    clone.body.setSize(player.body?.width || 75, player.body?.height || 75, true);
+    try { clone.play("walk"); } catch {}
+    clone.hp = Math.max(1, playerHp);
+    clone.maxHp = Math.max(1, playerMaxHp);
+    clone.castsLeft = this.getCastLimit();
+    clone.copyCooldowns = new Map();
+    clone.orbitPhase = angle;
+    clone.orbitRadius = 92 + this.clones.length * 18;
+    clone.lastHit = 0;
+    clone.vanishQueued = false;
+    this.clones.push(clone);
+    this.showCloneSpawn(clone.x, clone.y);
+  }
+
+  updateClones(time, delta) {
+    if (!this.clones.length) return;
+    this.clones = this.clones.filter((clone) => clone?.active);
+    const maxClones = Math.max(1, this.getCloneCount());
+    this.clones.forEach((clone, index) => {
+      const spacingAngle = (index / maxClones) * Math.PI * 2;
+      clone.orbitPhase = (clone.orbitPhase ?? spacingAngle) + delta * 0.0015;
+      const orbitAngle = clone.orbitPhase + spacingAngle;
+      const orbitRadius = clone.orbitRadius || 92;
+      const desiredX = player.x + Math.cos(orbitAngle) * orbitRadius;
+      const desiredY = player.y + Math.sin(orbitAngle) * orbitRadius * 0.78;
+      const dx = desiredX - clone.x;
+      const dy = desiredY - clone.y;
+      const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      const speed = Math.min(360, dist * 7) * getMoveSpeedMultiplier();
+      clone.body.setVelocity((dx / dist) * speed, (dy / dist) * speed);
+      const aimTarget = this.findCloneTarget(clone, 980);
+      clone.setFlipX(aimTarget?.active ? aimTarget.x < clone.x : clone.x < player.x);
+      if (dist > 7) {
+        if (clone.anims && clone.anims.currentAnim?.key !== "walk") {
+          try { clone.play("walk"); } catch {}
+        }
+      } else if (clone.anims && clone.anims.currentAnim?.key !== "idle") {
+        try { clone.play("idle"); } catch {}
+      }
+
+      if (clone.castsLeft > 0 && this.castCloneSkill(clone, time)) {
+        clone.castsLeft--;
+        if (clone.castsLeft <= 0 && !clone.vanishQueued) {
+          clone.vanishQueued = true;
+          this.scene.time.delayedCall(230, () => this.destroyClone(clone));
+        }
+      }
+
+      enemies.getChildren().forEach((enemy) => {
+        if (!enemy.active) return;
+        if (Phaser.Math.Distance.Between(clone.x, clone.y, enemy.x, enemy.y) >= 42) return;
+        clone.hp -= CONTACT_DAMAGE_PER_SEC * (delta / 1000) * getDamageTakenMultiplier();
+        if (time > clone.lastHit + 120) {
+          clone.lastHit = time;
+          this.scene.tweens.add({ targets: clone, alpha: 0.42, duration: 55, yoyo: true });
+        }
+      });
+      if (clone.hp <= 0) this.destroyClone(clone);
+    });
+  }
+
+  findCloneTarget(clone, range = 900) {
+    return findEnemiesInRange(clone.x, clone.y, range, 1)[0] || findNearestEnemy();
+  }
+
+  getCopyableWeapons() {
+    if (!weaponManager?.weapons) return [];
+    return weaponManager.weapons.filter((weapon) => {
+      if (!weapon || weapon === this || weapon.type === "fake") return false;
+      if (weapon.isEvolved?.("reaper") || weapon.isEvolved?.("lich")) return false;
+      return true;
+    });
+  }
+
+  getCloneSkillCooldown(weapon) {
+    if (!weapon) return 900;
+    let cooldown = weapon.cooldown || 900;
+    if (weapon.type === "machineGun" && weapon.isEvolved?.("doomGuidance")) return 2000;
+    if (weapon.type === "machineGun" && weapon.isEvolved?.("gatlingGun")) cooldown *= 0.5;
+    if (weapon.type === "magicMissile" && weapon.level >= 7) cooldown *= 0.5;
+    if (weapon.type === "magicMissile" && weapon.isEvolved?.("comet")) cooldown *= 2;
+    if (weapon.type === "lung" && weapon.level >= 5) cooldown *= 0.5;
+    return Math.max(120, cooldown * getWeaponCooldownMultiplier());
+  }
+
+  getReadyCopyWeapon(clone, time) {
+    const copyable = this.getCopyableWeapons();
+    if (!copyable.length) return null;
+    const ready = copyable.filter((weapon) => time >= (clone.copyCooldowns?.get(weapon.type) || 0));
+    if (!ready.length) return null;
+    return Phaser.Utils.Array.GetRandom(ready);
+  }
+
+  castCloneSkill(clone, time = this.scene.time.now) {
+    if (!clone?.active) return;
+    const copyable = this.getCopyableWeapons();
+    const copied = this.getReadyCopyWeapon(clone, time);
+    if (copyable.length && !copied) return false;
+    if (!copyable.length && time < (clone.copyCooldowns?.get("fake") || 0)) return false;
+    const type = copied?.type || "fake";
+    const level = copied?.level || this.level;
+    const target = this.findCloneTarget(clone, 980);
+    if (copied) clone.copyCooldowns.set(copied.type, time + this.getCloneSkillCooldown(copied));
+    else clone.copyCooldowns.set("fake", time + this.getCooldown() * getWeaponCooldownMultiplier());
+    if (!target?.active) return false;
+
+    switch (type) {
+      case "machineGun":
+        this.cloneMachineGun(clone, target, level, copied);
+        break;
+      case "magicMissile":
+        this.cloneMagicMissile(clone, target, level, copied);
+        break;
+      case "lightning":
+        this.cloneLightning(clone, target, level);
+        break;
+      case "laser":
+        this.cloneLaser(clone, target, level);
+        break;
+      case "skull":
+        this.cloneSkull(clone, level);
+        break;
+      case "lung":
+        this.cloneLung(clone, target, level);
+        break;
+      case "scythe":
+        if (copied?.swing) copied.swing(this.scene.time.now, clone.x, clone.y, Phaser.Math.FloatBetween(-0.25, 0.25));
+        else this.cloneFallbackBurst(clone, level);
+        break;
+      case "blackHole":
+        this.cloneBlackHole(clone, target, level, copied);
+        break;
+      case "chain":
+        this.cloneChain(clone, level, copied);
+        break;
+      default:
+        this.cloneFallbackBurst(clone, level);
+        break;
+    }
+    return true;
+  }
+
+  cloneMachineGun(clone, target, level, weapon) {
+    if (weapon?.isEvolved?.("doomGuidance")) {
+      const angle = Phaser.Math.Angle.Between(clone.x, clone.y, target.x, target.y);
+      const bullet = createTracerProjectile(this.scene, clone.x, clone.y, angle, 0xff44aa);
+      const damage = getWeaponDamage("machineGun", level) * 10;
+      bullet.damage = damage;
+      bullet.pierce = 0;
+      bullet.explodeRadius = 280;
+      bullet.explodeDamage = damage;
+      bullet.trailColor = 0xff44aa;
+      showMuzzleFlash(this.scene, clone.x, clone.y, angle, 0xff99dd);
+      this.scene.physics.moveToObject(bullet, target, 520);
+      this.showClonePulse(clone.x, clone.y, 0xff44aa);
+      return;
+    }
+    const count = weapon?.isEvolved?.("gatlingGun") ? 1 : (level >= 2 ? 2 : 1) + (level >= 7 ? 2 : 0);
+    const baseAngle = Phaser.Math.Angle.Between(clone.x, clone.y, target.x, target.y);
+    for (let i = 0; i < count; i++) {
+      const angle = baseAngle + (i - (count - 1) * 0.5) * 0.09;
+      const bullet = createTracerProjectile(this.scene, clone.x, clone.y, angle, 0x77ccff);
+      bullet.damage = getWeaponDamage("machineGun", level) * (weapon?.isEvolved?.("gatlingGun") ? 0.75 : 1);
+      bullet.pierce = level >= 6 ? 2 : 0;
+      bullet.explodeRadius = level >= 4 ? 55 : 0;
+      bullet.explodeDamage = getWeaponDamage("machineGun", level) * 0.6;
+      this.scene.physics.moveToObject(bullet, target, 650);
+    }
+    this.showClonePulse(clone.x, clone.y, 0x77ccff);
+  }
+
+  cloneMagicMissile(clone, target, level, weapon) {
+    const baseCount = level >= 7 ? 3 : (level >= 2 ? 2 : 1);
+    const count = weapon?.isEvolved?.("comet") ? Math.max(1, Math.ceil(baseCount * 0.5)) : baseCount;
+    const targets = findEnemiesInRange(clone.x, clone.y, 900, count);
+    const fallback = targets[0] || target;
+    const baseAngle = Phaser.Math.Angle.Between(clone.x, clone.y, fallback.x, fallback.y);
+    for (let i = 0; i < count; i++) {
+      const missileTarget = targets[i] || fallback;
+      const angle = targets[i] ? Phaser.Math.Angle.Between(clone.x, clone.y, missileTarget.x, missileTarget.y) : baseAngle + (i - (count - 1) * 0.5) * 0.32;
+      const bullet = createProjectile(this.scene, clone.x + Math.cos(angle) * 16, clone.y + Math.sin(angle) * 16, 0x77ccff, 7);
+      const damageMultiplier = weapon?.isEvolved?.("comet") ? 3.5 : 1;
+      bullet.damage = getWeaponDamage("magicMissile", level) * damageMultiplier;
+      bullet.homing = true;
+      bullet.target = missileTarget;
+      bullet.speed = 480;
+      bullet.pierce = level >= 3 ? 1 : 0;
+      bullet.explodeRadius = (level >= 4 ? 70 : 0) * (weapon?.isEvolved?.("comet") ? 3 : 1);
+      bullet.explodeDamage = getWeaponDamage("magicMissile", level) * 0.5 * damageMultiplier;
+      bullet.splitOnHit = level >= 5;
+      bullet.splitCount = level >= 6 ? 6 : 3;
+      bullet.splitDamage = getWeaponDamage("magicMissile", level) * 0.45 * damageMultiplier;
+      this.scene.physics.moveToObject(bullet, missileTarget, bullet.speed);
+    }
+    this.showClonePulse(clone.x, clone.y, 0x77ccff);
+  }
+
+  cloneLightning(clone, target, level) {
+    const strikeRadius = level >= 6 ? 195 : 65;
+    showLightningStrike(this.scene, target.x, target.y, level >= 5);
+    if (level >= 6) {
+      explode.call(this.scene, target.x, target.y, strikeRadius, getWeaponDamage("lightning", level), { countAttack: false });
+    } else {
+      damageEnemy.call(this.scene, target, getWeaponDamage("lightning", level));
+    }
+    if (level >= 4 && target.active) {
+      target.stunnedUntil = this.scene.time.now + 700 * getStatusDurationMultiplier();
+      target.setTint(0x99ddff);
+    }
+  }
+
+  cloneLaser(clone, target, level) {
+    const shots = level >= 5 ? 4 : (level >= 2 ? 2 : 1);
+    const targets = findEnemiesInRange(clone.x, clone.y, 900, shots);
+    (targets.length ? targets : [target]).slice(0, shots).forEach((enemy) => {
+      const angle = Phaser.Math.Angle.Between(clone.x, clone.y, enemy.x, enemy.y);
+      const length = level >= 2 ? 780 : 560;
+      const endX = clone.x + Math.cos(angle) * length;
+      const endY = clone.y + Math.sin(angle) * length;
+      showLaserBeam(this.scene, clone.x, clone.y, endX, endY, level >= 4);
+      enemies.getChildren().forEach((candidate) => {
+        if (!candidate.active) return;
+        if (distanceToSegment(candidate.x, candidate.y, clone.x, clone.y, endX, endY) <= 28) {
+          if (level >= 4) candidate.burnUntil = this.scene.time.now + 1200 * getStatusDurationMultiplier();
+          damageEnemy.call(this.scene, candidate, getWeaponDamage("laser", level));
+        }
+      });
+    });
+  }
+
+  cloneSkull(clone, level) {
+    const radius = (level >= 3 ? 280 : 200) * (level >= 6 ? 2 : 1);
+    this.showClonePulse(clone.x, clone.y, 0xcc99ff, radius);
+    findEnemiesInRange(clone.x, clone.y, radius).forEach((enemy) => {
+      enemy.stunnedUntil = this.scene.time.now + (level >= 4 ? 1000 : 500) * getStatusDurationMultiplier();
+      enemy.poisonUntil = Math.max(enemy.poisonUntil || 0, this.scene.time.now + (level >= 2 ? 2500 : 1500) * getStatusDurationMultiplier());
+      enemy.poisonDamage = getWeaponDamage("skull", level) * 0.3;
+      enemy.nextPoisonTick = 0;
+      enemy.setTint(0xcc99ff);
+      damageEnemy.call(this.scene, enemy, getWeaponDamage("skull", level));
+    });
+  }
+
+  cloneLung(clone, target, level) {
+    const angle = Phaser.Math.Angle.Between(clone.x, clone.y, target.x, target.y);
+    const bullet = createProjectile(this.scene, clone.x, clone.y, 0xff8844, 9);
+    bullet.damage = getWeaponDamage("lung", level) * (level >= 6 ? 1.4 : 1);
+    bullet.explodeRadius = 120;
+    bullet.explodeDamage = getWeaponDamage("lung", level) * 0.8;
+    bullet.trailColor = 0xff8844;
+    this.scene.physics.moveToObject(bullet, target, 500);
+    this.showClonePulse(clone.x, clone.y, 0xff8844);
+  }
+
+  cloneBlackHole(clone, target, level, weapon) {
+    if (weapon?.spawnBlackHole) {
+      const count = weapon.isEvolved?.("eventHorizon") ? 1 : (level >= 3 ? 2 : 1);
+      for (let i = 0; i < count; i++) {
+        this.scene.time.delayedCall(i * 400, () => weapon.spawnBlackHole(this.scene.time.now));
+      }
+      this.showClonePulse(clone.x, clone.y, 0xaa44ff);
+      return;
+    }
+    const radius = (level >= 2 ? 280 : 200) * (level >= 6 ? 1.4 : 1);
+    this.showClonePulse(target.x, target.y, 0xaa44ff, radius * 0.35);
+    findEnemiesInRange(target.x, target.y, radius).forEach((enemy) => {
+      const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, target.x, target.y);
+      enemy.body?.setVelocity(Math.cos(angle) * 180, Math.sin(angle) * 180);
+      damageEnemy.call(this.scene, enemy, getWeaponDamage("blackHole", level) * 0.55);
+      if (level >= 7) enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, this.scene.time.now + 500 * getStatusDurationMultiplier());
+    });
+  }
+
+  cloneChain(clone, level, weapon) {
+    if (weapon?.performChainCast) {
+      const castCount = level >= 7 ? 2 : 1;
+      for (let i = 0; i < castCount; i++) weapon.performChainCast(i, clone);
+      return;
+    }
+    const maxLinks = level >= 5 ? 5 : level >= 2 ? 3 : 2;
+    const targets = findEnemiesInRange(clone.x, clone.y, 820, maxLinks);
+    let from = clone;
+    targets.forEach((enemy) => {
+      const line = this.scene.add.graphics().setDepth(48);
+      line.lineStyle(12, 0x55aaff, 0.12);
+      line.beginPath();
+      line.moveTo(from.x, from.y);
+      line.lineTo(enemy.x, enemy.y);
+      line.strokePath();
+      line.lineStyle(2, 0xeaffff, 0.9);
+      line.beginPath();
+      line.moveTo(from.x, from.y);
+      line.lineTo(enemy.x, enemy.y);
+      line.strokePath();
+      this.scene.tweens.add({ targets: line, alpha: 0, duration: 180, onComplete: () => line.destroy() });
+      damageEnemy.call(this.scene, enemy, getWeaponDamage("chain", level) * 0.7);
+      if (level >= 4) {
+        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, clone.x, clone.y);
+        enemy.body?.setVelocity(Math.cos(angle) * 180, Math.sin(angle) * 180);
+      }
+      from = enemy;
+    });
+  }
+
+  cloneFallbackBurst(clone, level) {
+    this.showClonePulse(clone.x, clone.y, 0x55aaff, 120);
+    findEnemiesInRange(clone.x, clone.y, 120, 4).forEach((enemy) => {
+      damageEnemy.call(this.scene, enemy, getWeaponDamage("fake", level));
+    });
+  }
+
+  showCloneSpawn(x, y) {
+    const ring = this.scene.add.circle(x, y, 28, 0x55aaff, 0).setStrokeStyle(3, 0x99ddff, 0.75).setDepth(58);
+    this.scene.tweens.add({ targets: ring, alpha: 0, scale: 2.1, duration: 260, ease: "Cubic.easeOut", onComplete: () => ring.destroy() });
+  }
+
+  showClonePulse(x, y, color = 0x55aaff, radius = 42) {
+    const pulse = this.scene.add.circle(x, y, radius, color, 0.12).setStrokeStyle(2, color, 0.65).setDepth(49);
+    this.scene.tweens.add({ targets: pulse, alpha: 0, scale: 1.45, duration: 220, onComplete: () => pulse.destroy() });
+  }
+
+  destroyClone(clone) {
+    if (!clone?.active) return;
+    this.showCloneDust(clone.x, clone.y);
+    clone.destroy();
+  }
+
+  showCloneDust(x, y) {
+    for (let i = 0; i < 10; i++) {
+      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      const dust = this.scene.add.circle(x, y, Phaser.Math.Between(4, 8), 0x9eb8d8, 0.5).setDepth(57);
+      this.scene.tweens.add({
+        targets: dust,
+        x: x + Math.cos(angle) * Phaser.Math.Between(22, 54),
+        y: y + Math.sin(angle) * Phaser.Math.Between(12, 34),
+        alpha: 0,
+        scale: 0.35,
+        duration: Phaser.Math.Between(260, 420),
+        ease: "Cubic.easeOut",
+        onComplete: () => dust.destroy(),
+      });
+    }
+  }
 }
 
 function create() {
@@ -2116,6 +2544,7 @@ function create() {
   pauseSurrenderText = null;
   runEndedBySurrender = false;
   isTreasurePending = false;
+  lastEnemyRecycleCheck = 0;
   itemStats = createEmptyItemStats();
   ownedItems = [];
   friendlySummons = [];
@@ -2206,6 +2635,7 @@ function update(time, delta) {
   }
 
   movePlayer();
+  recycleDistantEnemies.call(this, time);
 
   const enemyChildren = enemies.getChildren();
   enemyChildren.forEach((enemy) => {
@@ -3823,7 +4253,7 @@ function getPlayerAttackMultiplier() {
 }
 
 function getMoveSpeedMultiplier() {
-  return 1 + getPassiveLevel("agility") * 0.1 + ensureItemStats().moveSpeed;
+  return 1 + ensureItemStats().moveSpeed;
 }
 
 function getPickupRangeMultiplier() {
@@ -3835,7 +4265,7 @@ function getExpGainMultiplier() {
 }
 
 function getPlayerCritChance() {
-  return Math.min(0.95, PLAYER_BASE_CRIT_CHANCE + ensureItemStats().critChance);
+  return Math.min(0.95, PLAYER_BASE_CRIT_CHANCE + getPassiveLevel("gamble") * 0.05 + ensureItemStats().critChance);
 }
 
 function getPlayerCritDamageMultiplier() {
@@ -3901,6 +4331,7 @@ function getWeaponDamage(type, level) {
     scythe: [2.775, 7.162, 10.538, 14.588, 18.975, 29.152, 31.313],
     blackHole: [3.2, 7.25, 11.3, 15.35, 19.4, 22.1, 24.2],
     chain: [1.8, 4.05, 6.3, 8.1, 12.6, 18.0, 19.8],
+    fake: [1.2, 2.7, 4.2, 5.7, 7.2, 8.7, 10.2],
   };
   return damageTable[type][Math.min(level, WEAPON_MAX_LEVEL) - 1];
 }
@@ -4082,16 +4513,40 @@ function spawnEnemyWave() {
   for (let i = 0; i < spawnCount; i++) spawnEnemy.call(this);
 }
 
+function recycleDistantEnemies(time) {
+  if (!player || !enemies || isTreasurePending || isChoosingWeapon || isDead) return;
+  if (time < lastEnemyRecycleCheck + ENEMY_RECYCLE_CHECK_INTERVAL) return;
+  lastEnemyRecycleCheck = time;
+
+  const maxDistanceSq = ENEMY_RECYCLE_DISTANCE * ENEMY_RECYCLE_DISTANCE;
+  let recycled = 0;
+  enemies.getChildren().forEach((enemy) => {
+    if (recycled >= ENEMY_RECYCLE_MAX_PER_CHECK) return;
+    if (!enemy?.active || enemy.isBoss) return;
+    const dx = enemy.x - player.x;
+    const dy = enemy.y - player.y;
+    if (dx * dx + dy * dy <= maxDistanceSq) return;
+    enemy.bossAura?.destroy();
+    enemies.remove(enemy);
+    enemy.destroy();
+    recycled++;
+  });
+
+  for (let i = 0; i < recycled; i++) spawnEnemy.call(this);
+}
+
 function increaseEnemyMaxHp() {
-  enemyMaxHp += ENEMY_HEALTH_FLAT_INCREASE;
+  const flatIncrease = getEnemyFlatIncreaseForCurrentTime();
+  enemyMaxHp += flatIncrease;
   enemies.getChildren().forEach((enemy) => {
     if (!enemy.active) return;
-    const previousEnemyMaxHp = enemy.maxHp || (enemy.isBoss ? getBossMaxHp(enemyMaxHp - ENEMY_HEALTH_FLAT_INCREASE) : getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp - ENEMY_HEALTH_FLAT_INCREASE, enemy.isElite));
+    const previousEnemyMaxHp = enemy.maxHp || (enemy.isBoss ? getBossMaxHp(enemyMaxHp - flatIncrease) : getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp - flatIncrease, enemy.isElite));
     const nextEnemyMaxHp = enemy.isBoss ? getBossMaxHp(enemyMaxHp) : getEnemyMaxHpForType(enemy.enemyType, enemyMaxHp, enemy.isElite);
     enemy.maxHp = nextEnemyMaxHp;
     enemy.hp = Math.min(nextEnemyMaxHp, (enemy.hp || 0) + Math.max(1, nextEnemyMaxHp - previousEnemyMaxHp));
     showEnemyGrowthPulse.call(this, enemy.x, enemy.y);
   });
+  if (enemyHealthTimer) enemyHealthTimer.delay = getEnemyFlatIntervalForCurrentTime();
 }
 
 function increaseEnemyMaxHpPercent() {
@@ -4614,6 +5069,7 @@ function createWeapon(scene, type) {
     case "scythe":      return new ScytheWeapon(scene);
     case "blackHole":   return new BlackHoleWeapon(scene);
     case "chain":       return new ChainWeapon(scene);
+    case "fake":        return new FakeWeapon(scene);
     default: throw new Error(`Unknown weapon type: ${type}`);
   }
 }
@@ -4708,6 +5164,7 @@ function killPlayer() {
     hidePauseOverlay();
     runEndedBySurrender = false;
     isTreasurePending = false;
+    lastEnemyRecycleCheck = 0;
     devTimeAdjustedThisRun = false;
     passiveLevels = {};
     itemStats = createEmptyItemStats();
